@@ -41,7 +41,18 @@ impl RealNotionClient {
         let res_order_field = cfg.notion.databases.resource.fields.order.clone();
         let res_text_field = cfg.notion.databases.resource.fields.text.clone();
         let res_media_field = cfg.notion.databases.resource.fields.media.clone();
-        Self { http, notion_token, notion_version, batches_db, resources_db, main_title_field, res_relation_field, res_order_field, res_text_field, res_media_field }
+        Self {
+            http,
+            notion_token,
+            notion_version,
+            batches_db,
+            resources_db,
+            main_title_field,
+            res_relation_field,
+            res_order_field,
+            res_text_field,
+            res_media_field,
+        }
     }
 
     async fn create_page(&self, parent_db: &str, properties: serde_json::Value) -> Result<String> {
@@ -126,15 +137,19 @@ impl NotionClient for RealNotionClient {
             props[&self.res_relation_field] = serde_json::json!({"relation": [{"id": page_id}]});
         }
         if let Some(batch_id) = r.try_get::<i64, _>("batch_id").ok() {
-            let cnt = crate::db::next_resource_sequence(pool, batch_id).await.unwrap_or(0);
+            let cnt = crate::db::next_resource_sequence(pool, batch_id)
+                .await
+                .unwrap_or(0);
             props[&self.res_order_field] = serde_json::json!({"number": cnt});
         }
         match kind.as_str() {
             "text" => {
-                props[&self.res_text_field] = serde_json::json!({ "rich_text": [{"text": {"content": content}}] });
+                props[&self.res_text_field] =
+                    serde_json::json!({ "rich_text": [{"text": {"content": content}}] });
             }
             _ => {
-                props[&self.res_media_field] = serde_json::json!({ "rich_text": [{"text": {"content": content}}] });
+                props[&self.res_media_field] =
+                    serde_json::json!({ "rich_text": [{"text": {"content": content}}] });
             }
         }
         let page_id = self.create_page(&self.resources_db, props).await?;

@@ -123,27 +123,41 @@ fn validate(cfg: &Config) -> Result<(), ConfigError> {
     }
 
     if cfg.notion.databases.main.id.trim().is_empty() {
-        return Err(ConfigError::Invalid("notion.databases.main.id must be non-empty"));
+        return Err(ConfigError::Invalid(
+            "notion.databases.main.id must be non-empty",
+        ));
     }
     if cfg.notion.databases.main.fields.title.trim().is_empty() {
-        return Err(ConfigError::Invalid("notion.databases.main.fields.title must be non-empty"));
+        return Err(ConfigError::Invalid(
+            "notion.databases.main.fields.title must be non-empty",
+        ));
     }
 
     if cfg.notion.databases.resource.id.trim().is_empty() {
-        return Err(ConfigError::Invalid("notion.databases.resource.id must be non-empty"));
+        return Err(ConfigError::Invalid(
+            "notion.databases.resource.id must be non-empty",
+        ));
     }
     let rf = &cfg.notion.databases.resource.fields;
     if rf.relation.trim().is_empty() {
-        return Err(ConfigError::Invalid("notion.databases.resource.fields.relation must be non-empty"));
+        return Err(ConfigError::Invalid(
+            "notion.databases.resource.fields.relation must be non-empty",
+        ));
     }
     if rf.order.trim().is_empty() {
-        return Err(ConfigError::Invalid("notion.databases.resource.fields.order must be non-empty"));
+        return Err(ConfigError::Invalid(
+            "notion.databases.resource.fields.order must be non-empty",
+        ));
     }
     if rf.text.trim().is_empty() {
-        return Err(ConfigError::Invalid("notion.databases.resource.fields.text must be non-empty"));
+        return Err(ConfigError::Invalid(
+            "notion.databases.resource.fields.text must be non-empty",
+        ));
     }
     if rf.media.trim().is_empty() {
-        return Err(ConfigError::Invalid("notion.databases.resource.fields.media must be non-empty"));
+        return Err(ConfigError::Invalid(
+            "notion.databases.resource.fields.media must be non-empty",
+        ));
     }
 
     Ok(())
@@ -184,8 +198,8 @@ notion:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::tempdir;
     use std::io::Write;
+    use tempfile::tempdir;
 
     #[test]
     fn parse_example_ok() {
@@ -199,7 +213,10 @@ mod tests {
         let mut cfg = cfg;
         cfg.telegram.bot_token = "".into();
         let err = validate(&cfg).unwrap_err();
-        match err { ConfigError::Invalid(msg) => assert!(msg.contains("telegram.bot_token")), _ => panic!("wrong error") }
+        match err {
+            ConfigError::Invalid(msg) => assert!(msg.contains("telegram.bot_token")),
+            _ => panic!("wrong error"),
+        }
     }
 
     #[test]
@@ -207,12 +224,18 @@ mod tests {
         let mut cfg: Config = serde_yaml::from_str(example()).unwrap();
         cfg.notion.databases.main.id = "".into();
         let err = validate(&cfg).unwrap_err();
-        match err { ConfigError::Invalid(msg) => assert!(msg.contains("main.id")), _ => panic!("wrong error") }
+        match err {
+            ConfigError::Invalid(msg) => assert!(msg.contains("main.id")),
+            _ => panic!("wrong error"),
+        }
 
         let mut cfg: Config = serde_yaml::from_str(example()).unwrap();
         cfg.notion.databases.resource.id = "".into();
         let err = validate(&cfg).unwrap_err();
-        match err { ConfigError::Invalid(msg) => assert!(msg.contains("resource.id")), _ => panic!("wrong error") }
+        match err {
+            ConfigError::Invalid(msg) => assert!(msg.contains("resource.id")),
+            _ => panic!("wrong error"),
+        }
     }
 
     #[test]
@@ -220,7 +243,10 @@ mod tests {
         let mut cfg: Config = serde_yaml::from_str(example()).unwrap();
         cfg.notion.databases.main.fields.title = "".into();
         let err = validate(&cfg).unwrap_err();
-        match err { ConfigError::Invalid(msg) => assert!(msg.contains("fields.title")), _ => panic!("wrong error") }
+        match err {
+            ConfigError::Invalid(msg) => assert!(msg.contains("fields.title")),
+            _ => panic!("wrong error"),
+        }
 
         let mut cfg: Config = serde_yaml::from_str(example()).unwrap();
         cfg.notion.databases.resource.fields.relation = "".into();

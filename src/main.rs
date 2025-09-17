@@ -5,12 +5,12 @@ use std::time::Duration;
 use teloxide::prelude::*;
 use tracing::{error, info};
 
+mod config;
 mod db;
 mod handlers;
 mod model;
 mod notion;
 mod outbox;
-mod config;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -32,8 +32,8 @@ async fn main() -> Result<()> {
     let cfg = config::load(Some(&args.config))?;
     cfg.ensure_dirs()?;
 
-    let database_url =
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| format!("sqlite://{}/watchbot.db", cfg.app.data_dir));
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| format!("sqlite://{}/watchbot.db", cfg.app.data_dir));
     let data_dir = cfg.app.data_dir.clone();
 
     let pool = db::init_pool(&database_url).await?;

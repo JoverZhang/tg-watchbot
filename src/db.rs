@@ -274,9 +274,18 @@ pub async fn backoff_outbox(pool: &Pool, id: i64, attempt: i32) -> Result<()> {
 }
 
 #[instrument(skip_all)]
-pub async fn backoff_outbox_with_cap(pool: &Pool, id: i64, attempt: i32, max_cap_secs: i64) -> Result<()> {
+pub async fn backoff_outbox_with_cap(
+    pool: &Pool,
+    id: i64,
+    attempt: i32,
+    max_cap_secs: i64,
+) -> Result<()> {
     let secs = (5_i64) * (1_i64 << attempt.min(10));
-    let cap = if max_cap_secs <= 0 { secs } else { max_cap_secs };
+    let cap = if max_cap_secs <= 0 {
+        secs
+    } else {
+        max_cap_secs
+    };
     let secs = secs.min(cap);
     sqlx::query(
         "UPDATE outbox SET attempt = ?, due_at = datetime('now', ? || ' seconds') WHERE id = ?",
