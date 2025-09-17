@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::model::{BatchState, OutboxKind};
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -15,20 +16,32 @@ pub trait NotionClient: Send + Sync {
 pub struct RealNotionClient {
     http: reqwest::Client,
     notion_token: String,
+    notion_version: String,
     batches_db: String,
     resources_db: String,
+    main_title_field: String,
+    res_relation_field: String,
+    res_order_field: String,
+    res_text_field: String,
+    res_media_field: String,
 }
 
 impl RealNotionClient {
-    pub fn from_env() -> Self {
+    pub fn from_config(cfg: &Config) -> Self {
         let http = reqwest::Client::builder()
             .user_agent("tg-watchbot/0.1")
             .build()
             .expect("reqwest client");
-        let notion_token = std::env::var("NOTION_TOKEN").unwrap_or_default();
-        let batches_db = std::env::var("NOTION_BATCHES_DB").unwrap_or_default();
-        let resources_db = std::env::var("NOTION_RESOURCES_DB").unwrap_or_default();
-        Self { http, notion_token, batches_db, resources_db }
+        let notion_token = cfg.notion.token.clone();
+        let notion_version = cfg.notion.version.clone();
+        let batches_db = cfg.notion.databases.main.id.clone();
+        let resources_db = cfg.notion.databases.resource.id.clone();
+        let main_title_field = cfg.notion.databases.main.fields.title.clone();
+        let res_relation_field = cfg.notion.databases.resource.fields.relation.clone();
+        let res_order_field = cfg.notion.databases.resource.fields.order.clone();
+        let res_text_field = cfg.notion.databases.resource.fields.text.clone();
+        let res_media_field = cfg.notion.databases.resource.fields.media.clone();
+        Self { http, notion_token, notion_version, batches_db, resources_db, main_title_field, res_relation_field, res_order_field, res_text_field, res_media_field }
     }
 
     async fn create_page(&self, parent_db: &str, properties: serde_json::Value) -> Result<String> {
@@ -38,16 +51,24 @@ impl RealNotionClient {
             properties: serde_json::Value,
         }
         #[derive(Serialize)]
-        struct Parent<'a> { database_id: &'a str }
+        struct Parent<'a> {
+            database_id: &'a str,
+        }
 
         if self.notion_token.is_empty() || parent_db.is_empty() {
             return Err(anyhow!("Notion configuration missing"));
         }
-        let req = Req { parent: Parent { database_id: parent_db }, properties };
-        let res = self.http
+        let req = Req {
+            parent: Parent {
+                database_id: parent_db,
+            },
+            properties,
+        };
+        let res = self
+            .http
             .post("https://api.notion.com/v1/pages")
             .header("Authorization", format!("Bearer {}", self.notion_token))
-            .header("Notion-Version", "2022-06-28")
+            .header("Notion-Version", &self.notion_version)
             .json(&req)
             .send()
             .await?;
@@ -59,7 +80,10 @@ impl RealNotionClient {
             return Err(anyhow!("notion error: {}", body));
         }
         let v: serde_json::Value = res.json().await?;
-        Ok(v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string())
+        Ok(v.get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string())
     }
 }
 
@@ -74,7 +98,7 @@ impl NotionClient for RealNotionClient {
         let title: Option<String> = row.try_get("title").ok();
         let title = title.unwrap_or_else(|| "Untitled Batch".to_string());
         let props = serde_json::json!({
-            "Name": { "title": [{"text": {"content": title}}] }
+            self.main_title_field.clone(): { "title": [{"text": {"content": title}}] }
         });
         let page_id = self.create_page(&self.batches_db, props).await?;
         sqlx::query("UPDATE batches SET notion_page_id = ? WHERE id = ?")
@@ -97,12 +121,21 @@ impl NotionClient for RealNotionClient {
         let kind: String = r.get("kind");
         let content: String = r.get("content");
         let notion_page_id: Option<String> = r.try_get("notion_page_id").ok();
-        let mut props = serde_json::json!({
-            "Kind": { "select": {"name": kind}},
-            "Content": { "rich_text": [{"text": {"content": content}}] }
-        });
+        let mut props = serde_json::json!({});
         if let Some(page_id) = notion_page_id {
-            props["Batch"] = serde_json::json!({"relation": [{"id": page_id}]});
+            props[&self.res_relation_field] = serde_json::json!({"relation": [{"id": page_id}]});
+        }
+        if let Some(batch_id) = r.try_get::<i64, _>("batch_id").ok() {
+            let cnt = crate::db::next_resource_sequence(pool, batch_id).await.unwrap_or(0);
+            props[&self.res_order_field] = serde_json::json!({"number": cnt});
+        }
+        match kind.as_str() {
+            "text" => {
+                props[&self.res_text_field] = serde_json::json!({ "rich_text": [{"text": {"content": content}}] });
+            }
+            _ => {
+                props[&self.res_media_field] = serde_json::json!({ "rich_text": [{"text": {"content": content}}] });
+            }
         }
         let page_id = self.create_page(&self.resources_db, props).await?;
         Ok(page_id)
@@ -116,7 +149,12 @@ pub struct MockNotionClient {
 }
 
 impl Default for MockNotionClient {
-    fn default() -> Self { Self { pushed_batches: Default::default(), pushed_resources: Default::default() } }
+    fn default() -> Self {
+        Self {
+            pushed_batches: Default::default(),
+            pushed_resources: Default::default(),
+        }
+    }
 }
 
 #[async_trait]

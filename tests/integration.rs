@@ -23,10 +23,14 @@ async fn begin_commit_flow_enqueues_and_pushes() {
         .await
         .unwrap();
     // Add a standalone resource which is immediately enqueued
-    let r3 = db::insert_resource(&pool, user_id, None, "text", "C", 3).await.unwrap();
+    let r3 = db::insert_resource(&pool, user_id, None, "text", "C", 3)
+        .await
+        .unwrap();
 
     // Commit the batch; should enqueue three tasks: 1 batch + 2 resources
-    db::commit_batch(&pool, user_id, Some("Title")).await.unwrap();
+    db::commit_batch(&pool, user_id, Some("Title"))
+        .await
+        .unwrap();
 
     let mut kinds = sqlx::query_scalar::<_, String>("SELECT kind FROM outbox ORDER BY id")
         .fetch_all(&pool)
@@ -38,10 +42,15 @@ async fn begin_commit_flow_enqueues_and_pushes() {
     let mock = MockNotionClient::default();
     // Process tasks until none left
     loop {
-        if !process_next_task(&pool, &mock).await.unwrap() { break; }
+        if !process_next_task(&pool, &mock, 60).await.unwrap() {
+            break;
+        }
     }
     // Outbox should be empty
-    let cnt: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM outbox").fetch_one(&pool).await.unwrap();
+    let cnt: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM outbox")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(cnt, 0);
 }
 
@@ -49,11 +58,18 @@ async fn begin_commit_flow_enqueues_and_pushes() {
 async fn rollback_discards_resources() {
     let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
     sqlx::migrate!("./migrations").run(&pool).await.unwrap();
-    let user_id = db::get_or_create_user(&pool, 1000, Some("tester2"), Some("Test User 2")).await.unwrap();
+    let user_id = db::get_or_create_user(&pool, 1000, Some("tester2"), Some("Test User 2"))
+        .await
+        .unwrap();
     let batch_id = db::open_batch(&pool, user_id).await.unwrap();
-    let _r1 = db::insert_resource(&pool, user_id, Some(batch_id), "text", "msg", 11).await.unwrap();
+    let _r1 = db::insert_resource(&pool, user_id, Some(batch_id), "text", "msg", 11)
+        .await
+        .unwrap();
     db::rollback_batch(&pool, user_id).await.unwrap();
     // Ensure no outbox items were created
-    let cnt: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM outbox").fetch_one(&pool).await.unwrap();
+    let cnt: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM outbox")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
     assert_eq!(cnt, 0);
 }

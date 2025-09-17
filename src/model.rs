@@ -74,4 +74,3 @@ pub struct OutboxTask {
     pub attempt: i32,
     pub due_at: DateTime<Utc>,
 }
-

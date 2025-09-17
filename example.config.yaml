@@ -1,0 +1,27 @@
+app:
+  data_dir: "./data"
+  poll_interval_ms: 500
+  max_backoff_seconds: 60
+
+telegram:
+  bot_token: "YOUR_TELEGRAM_BOT_TOKEN"
+  allowed_users:
+    - 123456789
+
+notion:
+  token: "YOUR_NOTION_INTEGRATION_TOKEN"
+  version: "2022-06-28"
+
+  databases:
+    main:
+      id: "NOTION_MAIN_DATABASE_ID"
+      fields:
+        title: "Title"
+    resource:
+      id: "NOTION_RESOURCE_DATABASE_ID"
+      fields:
+        relation: "Main"
+        order: "No"
+        text: "Text"
+        media: "Media"
+
