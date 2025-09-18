@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
+use std::any::Any;
 use reqwest::{Client, StatusCode, Url};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
@@ -43,7 +44,7 @@ impl fmt::Debug for NotionClient {
 }
 
 #[async_trait]
-pub trait NotionService: Send + Sync {
+pub trait NotionService: Send + Sync + Any {
     async fn create_main_page(&self, ids: &NotionIds, title: &str) -> Result<String>;
 
     async fn create_resource_page(

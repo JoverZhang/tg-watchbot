@@ -312,9 +312,13 @@ pub async fn fetch_resource_for_outbox(pool: &Pool, resource_id: i64) -> Result<
         return Err(anyhow!("resource {} not found", resource_id));
     };
 
-    // For Notion ordering, always preserve original Telegram message order.
+    // Use stored sequence for Notion ordering: within batch it's 1..N; standalone defaults to 1.
     let batch_id_opt = row.try_get::<Option<i64>, _>("batch_id").ok().flatten();
-    let sequence = row.get::<i32, _>("tg_message_id") as i64;
+    let sequence = row
+        .try_get::<Option<i64>, _>("sequence")
+        .ok()
+        .flatten()
+        .unwrap_or(1);
 
     let kind: String = row.get("kind");
     let content: String = row.get("content");
@@ -340,6 +344,8 @@ pub async fn fetch_resource_for_outbox(pool: &Pool, resource_id: i64) -> Result<
     Ok(ResourceForOutbox {
         batch_id: batch_id_opt,
         sequence,
+        kind,
+        content,
         text,
         media_name: row
             .try_get::<Option<String>, _>("media_name")

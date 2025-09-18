@@ -1,6 +1,6 @@
 use crate::db::{self, BatchForOutbox, ResourceForOutbox};
 use crate::model::{BatchState, OutboxKind};
-use crate::notion::{NotionIds, NotionService};
+use crate::notion::{NotionClient, NotionIds, NotionService};
 use anyhow::{anyhow, Result};
 use sqlx::SqlitePool;
 use tracing::{debug, info, instrument, warn};
@@ -120,18 +120,70 @@ async fn push_resource_task(
     info!(
         resource_id,
         order = resource.sequence,
+        kind = %resource.kind,
         "creating resource Notion page"
     );
-    let page_id = notion
-        .create_resource_page(
-            notion_ids,
-            parent_page_id.as_deref(),
-            resource.sequence,
-            text,
-            media_name,
-            media_url.as_deref(),
-        )
-        .await?;
+
+    // Prefer external URL if present; otherwise, attempt to upload a local file if available
+    let page_id = if media_url.is_some() || resource.kind == "text" {
+        notion
+            .create_resource_page(
+                notion_ids,
+                parent_page_id.as_deref(),
+                resource.sequence,
+                text,
+                media_name,
+                media_url.as_deref(),
+            )
+            .await?
+    } else {
+        // Try to downcast to a concrete NotionClient for file uploads
+        if let Some(client) = (notion as &dyn std::any::Any).downcast_ref::<NotionClient>() {
+            // Use the DB `content` as a local file path if it exists
+            let path = std::path::Path::new(&resource.content);
+            if path.exists() {
+                let file_name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("uploaded.bin");
+                let upload_id = client.upload_file(path).await?;
+                client
+                    .create_resource_page_with_file_upload(
+                        notion_ids,
+                        parent_page_id.as_deref(),
+                        resource.sequence,
+                        text,
+                        Some(file_name),
+                        Some(&upload_id),
+                    )
+                    .await?
+            } else {
+                // Fallback: create without media
+                notion
+                    .create_resource_page(
+                        notion_ids,
+                        parent_page_id.as_deref(),
+                        resource.sequence,
+                        text,
+                        None,
+                        None,
+                    )
+                    .await?
+            }
+        } else {
+            // Fallback for mock implementations without upload support
+            notion
+                .create_resource_page(
+                    notion_ids,
+                    parent_page_id.as_deref(),
+                    resource.sequence,
+                    text,
+                    None,
+                    None,
+                )
+                .await?
+        }
+    };
     db::mark_resource_notion_page_id(pool, resource_id, &page_id).await?;
     Ok(())
 }

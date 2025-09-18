@@ -152,7 +152,12 @@ async fn download_file(
     let file = bot.get_file(file_id).await?;
     let dir = format!("{}/media/{}/", data_dir, tg_user_id);
     tokio::fs::create_dir_all(&dir).await.ok();
-    let path = format!("{}{}_{}.bin", dir, msg_id, file.meta.unique_id);
+    // Try to preserve the original file extension from Telegram's file path
+    let ext = std::path::Path::new(&file.path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin");
+    let path = format!("{}{}_{}.{}", dir, msg_id, file.meta.unique_id, ext);
     let mut dst = tokio::fs::File::create(&path).await?;
     bot.download_file(&file.path, &mut dst).await?;
     Ok(path)

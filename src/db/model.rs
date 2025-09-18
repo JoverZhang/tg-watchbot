@@ -18,6 +18,8 @@ pub struct BatchForOutbox {
 pub struct ResourceForOutbox {
     pub batch_id: Option<i64>,
     pub sequence: i64,
+    pub kind: String,
+    pub content: String,
     pub text: Option<String>,
     pub media_name: Option<String>,
     pub media_url: Option<String>,

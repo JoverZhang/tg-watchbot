@@ -2,7 +2,10 @@ use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 use std::time::Duration;
-use teloxide::prelude::*;
+use teloxide::{
+    prelude::*,
+    types::{BotCommand, KeyboardButton, KeyboardMarkup, MenuButton},
+};
 use tracing::{error, info};
 
 mod config;
@@ -74,6 +77,20 @@ async fn main() -> Result<()> {
         let pool = pool.clone();
         let data_dir = data_dir.clone();
         async move {
+
+            bot.set_chat_menu_button()
+                .chat_id(msg.chat.id)
+                .menu_button(MenuButton::Commands)
+                .await?;
+
+            bot.send_message(msg.chat.id, "Please select an action:")
+                .reply_markup(KeyboardMarkup::new(vec![
+                    vec![KeyboardButton::new("==BEGIN==")],
+                    vec![KeyboardButton::new("==COMMIT==")],
+                    vec![KeyboardButton::new("==ROLLBACK==")],
+                ]))
+                .await?;
+
             if let Err(err) = handlers::handle_update(&bot, &pool, &data_dir, &msg).await {
                 error!(?err, "failed to handle update");
             }
