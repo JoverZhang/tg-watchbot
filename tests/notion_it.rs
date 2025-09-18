@@ -5,6 +5,7 @@ use tg_watchbot::config;
 use tg_watchbot::notion::{NotionClient, NotionFacade};
 
 #[tokio::test]
+#[ignore]
 async fn notion_it_creates_main_and_resources() -> Result<()> {
     // Load local config (exact schema as example.config.yaml)
     let cfg = config::load(Some(Path::new("./config.yaml")))?;

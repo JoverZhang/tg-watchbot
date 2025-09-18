@@ -557,19 +557,22 @@ mod tests {
 
 #[instrument(skip_all)]
 pub async fn get_last_processed_outbox_id(pool: &Pool) -> Result<i64> {
-    let id: i64 =
-        sqlx::query_scalar("SELECT last_processed_outbox_id FROM sync_state WHERE id = 1")
-            .fetch_one(pool)
-            .await?;
+    let id: i64 = sqlx::query_scalar(
+        "SELECT last_sent_outbox_id FROM outbox_cursor WHERE id = 1",
+    )
+    .fetch_one(pool)
+    .await?;
     Ok(id)
 }
 
 #[instrument(skip_all)]
 pub async fn update_last_processed_outbox_id(pool: &Pool, outbox_id: i64) -> Result<()> {
-    sqlx::query("UPDATE sync_state SET last_processed_outbox_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
-        .bind(outbox_id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE outbox_cursor SET last_sent_outbox_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+    )
+    .bind(outbox_id)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

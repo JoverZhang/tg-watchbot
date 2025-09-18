@@ -626,7 +626,10 @@ mod tests {
             body["properties"]["rel-parent"]["relation"][0]["id"],
             "parent-1"
         );
-        assert_eq!(body["properties"]["res-order"]["number"], 3);
+        assert_eq!(
+            body["properties"]["res-order"]["title"][0]["text"]["content"],
+            "#3"
+        );
         assert_eq!(
             body["properties"]["res-text"]["rich_text"][0]["text"]["content"],
             "details"
@@ -641,7 +644,10 @@ mod tests {
     fn build_resource_page_request_omits_optional_fields() {
         let ids = sample_ids();
         let body = build_resource_page_request(&ids, None, 7, None, None, None, None);
-        assert_eq!(body["properties"]["res-order"]["number"], 7);
+        assert_eq!(
+            body["properties"]["res-order"]["title"][0]["text"]["content"],
+            "#7"
+        );
         assert!(body["properties"].get("rel-parent").is_none());
         assert!(body["properties"].get("res-text").is_none());
         assert!(body["properties"].get("res-media").is_none());

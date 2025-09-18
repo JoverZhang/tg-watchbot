@@ -1,4 +1,4 @@
--- Users table
+-- Users
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tg_user_id INTEGER NOT NULL UNIQUE,
@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS batches (
     rolled_back_at DATETIME
 );
 
--- Resources
+-- Resources (final schema after all migrations)
 CREATE TABLE IF NOT EXISTS resources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -28,7 +28,12 @@ CREATE TABLE IF NOT EXISTS resources (
     content TEXT NOT NULL,
     tg_message_id INTEGER NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(user_id, tg_message_id)
+    notion_page_id TEXT,
+    sequence INTEGER,
+    text TEXT,
+    media_name TEXT,
+    media_url TEXT,
+    UNIQUE(user_id, tg_message_id, kind, content)
 );
 
 -- Outbox
@@ -48,3 +53,10 @@ CREATE TABLE IF NOT EXISTS current_batch (
     batch_id INTEGER REFERENCES batches(id) ON DELETE SET NULL
 );
 
+-- Outbox cursor (single row)
+CREATE TABLE IF NOT EXISTS outbox_cursor (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    last_sent_outbox_id INTEGER NOT NULL DEFAULT 0,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+INSERT OR IGNORE INTO outbox_cursor (id, last_sent_outbox_id) VALUES (1, 0);
