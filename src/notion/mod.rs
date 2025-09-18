@@ -4,6 +4,8 @@ use reqwest::{Client, StatusCode, Url};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::fmt;
+use std::path::Path;
+use tokio::fs;
 use tracing::{debug, info, warn};
 
 use crate::notion::model::RetrieveDatabaseResp;
@@ -190,6 +192,29 @@ impl NotionClient {
             text,
             media_name,
             media_url,
+            None,
+        );
+        self.execute_create(body).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_resource_page_with_file_upload(
+        &self,
+        ids: &NotionIds,
+        parent_main_page_id: Option<&str>,
+        order: i64,
+        text: Option<&str>,
+        media_name: Option<&str>,
+        file_upload_id: Option<&str>,
+    ) -> Result<String> {
+        let body = build_resource_page_request(
+            ids,
+            parent_main_page_id,
+            order,
+            text,
+            media_name,
+            None,
+            file_upload_id,
         );
         self.execute_create(body).await
     }
@@ -205,6 +230,93 @@ impl NotionClient {
             return Err(anyhow::anyhow!("notion retrieve db error {}: {}", res.status(), res.text().await.unwrap_or_default()));
         }
         Ok(res.json::<RetrieveDatabaseResp>().await?)
+    }
+
+    /// Upload a file to Notion using the 3-step process and return the file URL
+    pub async fn upload_file<P: AsRef<Path>>(&self, file_path: P) -> Result<String> {
+        let file_path = file_path.as_ref();
+        let file_name = file_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow!("invalid file name"))?;
+
+        // Read file content
+        let file_content = fs::read(file_path)
+            .await
+            .with_context(|| format!("failed to read file: {}", file_path.display()))?;
+
+        // Step 1: Create file upload object
+        let create_upload_url = self.base_url.join("v1/file_uploads")?;
+        let create_body = json!({
+            "name": file_name,
+            "content_type": self.get_content_type(file_path),
+            "mode": "single_part"
+        });
+
+        let create_res = self
+            .http
+            .post(create_upload_url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Notion-Version", &self.version)
+            .header("Content-Type", "application/json")
+            .json(&create_body)
+            .send()
+            .await
+            .context("failed to create file upload")?;
+
+        if !create_res.status().is_success() {
+            let status = create_res.status();
+            let body = create_res.text().await.unwrap_or_default();
+            return Err(anyhow!("create file upload failed {}: {}", status, body));
+        }
+
+        let create_response: CreateFileUploadResponse = create_res
+            .json()
+            .await
+            .context("failed to parse create upload response")?;
+
+        // Step 2: Send file content
+        let content_type = self.get_content_type(file_path);
+        let form = reqwest::multipart::Form::new()
+            .part(
+                "file",
+                reqwest::multipart::Part::bytes(file_content)
+                    .file_name(file_name.to_string())
+                    .mime_str(content_type)?,
+            );
+
+        let send_res = self
+            .http
+            .post(&create_response.upload_url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Notion-Version", &self.version)
+            .multipart(form)
+            .send()
+            .await
+            .context("failed to send file content")?;
+
+        if !send_res.status().is_success() {
+            let status = send_res.status();
+            let body = send_res.text().await.unwrap_or_default();
+            return Err(anyhow!("send file failed {}: {}", status, body));
+        }
+
+        // The file is now uploaded and ready to be used
+        // Return the file upload ID which can be referenced in page properties
+        info!("Successfully uploaded file: {} with ID: {}", file_name, create_response.id);
+        Ok(create_response.id)
+    }
+
+    fn get_content_type(&self, file_path: &Path) -> &'static str {
+        match file_path.extension().and_then(|ext| ext.to_str()) {
+            Some("jpg") | Some("jpeg") => "image/jpeg",
+            Some("png") => "image/png",
+            Some("gif") => "image/gif",
+            Some("mp4") => "video/mp4",
+            Some("mov") => "video/quicktime",
+            Some("avi") => "video/x-msvideo",
+            _ => "application/octet-stream",
+        }
     }
 }
 
@@ -264,6 +376,7 @@ pub fn build_resource_page_request(
     text: Option<&str>,
     media_name: Option<&str>,
     media_url: Option<&str>,
+    file_upload_id: Option<&str>,
 ) -> Value {
     let mut properties = Map::new();
     if let Some(parent_id) = parent_main_page_id {
@@ -301,7 +414,22 @@ pub fn build_resource_page_request(
         );
     }
 
-    if let Some(url) = media_url.filter(|url| !url.is_empty()) {
+    // Handle file uploads (either external URL or uploaded file ID)
+    if let Some(upload_id) = file_upload_id.filter(|id| !id.is_empty()) {
+        let name = media_name.filter(|name| !name.is_empty()).unwrap_or("Uploaded file");
+        properties.insert(
+            ids.f_res_media.clone(),
+            json!({
+                "files": [
+                    {
+                        "name": name,
+                        "type": "file_upload",
+                        "file_upload": { "id": upload_id }
+                    }
+                ]
+            }),
+        );
+    } else if let Some(url) = media_url.filter(|url| !url.is_empty()) {
         let name = media_name.filter(|name| !name.is_empty()).unwrap_or(url);
         properties.insert(
             ids.f_res_media.clone(),
@@ -326,6 +454,22 @@ pub fn build_resource_page_request(
 #[derive(Deserialize)]
 struct CreatePageResponse {
     id: String,
+}
+
+#[derive(Deserialize)]
+struct CreateFileUploadResponse {
+    id: String,
+    upload_url: String,
+}
+
+#[derive(Deserialize)]
+struct CompleteFileUploadResponse {
+    file: UploadedFile,
+}
+
+#[derive(Deserialize)]
+struct UploadedFile {
+    url: String,
 }
 
 /// Thin façade that binds a `NotionClient` to resolved property IDs. It exposes
@@ -385,6 +529,35 @@ impl NotionFacade {
             )
             .await
     }
+
+    /// Upload a local file and create a media resource under the optional main page.
+    pub async fn create_resource_media_from_file<P: AsRef<Path>>(
+        &self,
+        main_page_id: Option<&str>,
+        order: i64,
+        file_path: P,
+    ) -> Result<String> {
+        let file_path = file_path.as_ref();
+        let file_name = file_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| anyhow!("invalid file name"))?;
+
+        // Upload the file first to get the file upload ID
+        let file_upload_id = self.client.upload_file(file_path).await?;
+
+        // Then create the resource page with the uploaded file ID
+        self.client
+            .create_resource_page_with_file_upload(
+                &self.ids,
+                main_page_id,
+                order,
+                None,
+                Some(file_name),
+                Some(&file_upload_id),
+            )
+            .await
+    }
 }
 
 #[cfg(test)]
@@ -425,6 +598,7 @@ mod tests {
             Some("details"),
             Some("a.jpg"),
             Some("https://cdn/a.jpg"),
+            None,
         );
 
         assert_eq!(body["parent"]["database_id"], "resource-db");
@@ -446,7 +620,7 @@ mod tests {
     #[test]
     fn build_resource_page_request_omits_optional_fields() {
         let ids = sample_ids();
-        let body = build_resource_page_request(&ids, None, 7, None, None, None);
+        let body = build_resource_page_request(&ids, None, 7, None, None, None, None);
         assert_eq!(body["properties"]["res-order"]["number"], 7);
         assert!(body["properties"].get("rel-parent").is_none());
         assert!(body["properties"].get("res-text").is_none());

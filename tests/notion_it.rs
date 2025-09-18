@@ -36,13 +36,12 @@ async fn notion_it_creates_main_and_resources() -> Result<()> {
         text_page.replace('-', "")
     );
 
-    // Create a photo resource (external URL only)
+    // Create a photo resource (upload local file)
     let photo_page = notion
-        .create_resource_media(
+        .create_resource_media_from_file(
             Some(&main_page_id),
             2,
-            "sample.jpg",
-            "https://example.com/sample.jpg",
+            "tests/media/test_picture.jpg",
         )
         .await?;
     assert!(!photo_page.trim().is_empty());
@@ -51,13 +50,12 @@ async fn notion_it_creates_main_and_resources() -> Result<()> {
         photo_page.replace('-', "")
     );
 
-    // Create a video resource (external URL only)
+    // Create a video resource (upload local file)
     let video_page = notion
-        .create_resource_media(
+        .create_resource_media_from_file(
             Some(&main_page_id),
             3,
-            "sample.mp4",
-            "https://example.com/sample.mp4",
+            "tests/media/video.mp4",
         )
         .await?;
     assert!(!video_page.trim().is_empty());

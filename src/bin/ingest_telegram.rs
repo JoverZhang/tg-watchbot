@@ -179,6 +179,7 @@ async fn print_pending_notion_payloads(
                     text,
                     resource.media_name.as_deref().filter(|s| !s.is_empty()),
                     media_url.as_deref(),
+                    None,
                 );
                 println!(
                     "\n[outbox #{id}] Notion resource request (resource {ref_id})\n{}",
