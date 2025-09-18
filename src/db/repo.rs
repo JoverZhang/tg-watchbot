@@ -419,20 +419,6 @@ pub async fn mark_resource_notion_page_id(
     Ok(())
 }
 
-#[instrument(skip_all)]
-pub async fn enqueue_outbox(
-    pool: &Pool,
-    user_id: i64,
-    kind: OutboxKind,
-    ref_id: i64,
-    due_at: DateTime<Utc>,
-) -> Result<i64> {
-    let mut tx = pool.begin().await?;
-    let id = enqueue_outbox_tx(&mut tx, user_id, kind, ref_id, due_at).await?;
-    tx.commit().await?;
-    Ok(id)
-}
-
 async fn enqueue_outbox_tx(
     tx: &mut Transaction<'_, Sqlite>,
     user_id: i64,
@@ -471,6 +457,7 @@ pub async fn next_due_outbox(pool: &Pool) -> Result<Option<OutboxItem>> {
     }
 }
 
+#[allow(dead_code)]
 pub async fn list_due_outbox(pool: &Pool) -> Result<Vec<(i64, String, i64)>> {
     let rows = sqlx::query(
         "SELECT id, kind, ref_id FROM outbox WHERE datetime(due_at) <= CURRENT_TIMESTAMP ORDER BY datetime(due_at) ASC",
@@ -500,22 +487,6 @@ pub async fn delete_outbox(pool: &Pool, id: i64) -> Result<()> {
 }
 
 #[instrument(skip_all)]
-pub async fn backoff_outbox(pool: &Pool, id: i64, attempt: i32) -> Result<()> {
-    // Exponential backoff: 5s * 2^attempt, capped at 3600s
-    let secs = (5_i64) * (1_i64 << attempt.min(10));
-    let secs = secs.min(3600);
-    sqlx::query(
-        "UPDATE outbox SET attempt = ?, due_at = datetime('now', ? || ' seconds') WHERE id = ?",
-    )
-    .bind(attempt + 1)
-    .bind(secs)
-    .bind(id)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-#[instrument(skip_all)]
 pub async fn backoff_outbox_with_cap(
     pool: &Pool,
     id: i64,
@@ -540,6 +511,7 @@ pub async fn backoff_outbox_with_cap(
     Ok(())
 }
 
+#[allow(dead_code)]
 #[instrument(skip_all)]
 pub async fn get_last_processed_outbox_id(pool: &Pool) -> Result<i64> {
     let id: i64 = sqlx::query_scalar("SELECT last_sent_outbox_id FROM outbox_cursor WHERE id = 1")
@@ -548,6 +520,7 @@ pub async fn get_last_processed_outbox_id(pool: &Pool) -> Result<i64> {
     Ok(id)
 }
 
+#[allow(dead_code)]
 #[instrument(skip_all)]
 pub async fn update_last_processed_outbox_id(pool: &Pool, outbox_id: i64) -> Result<()> {
     sqlx::query(
@@ -559,6 +532,7 @@ pub async fn update_last_processed_outbox_id(pool: &Pool, outbox_id: i64) -> Res
     Ok(())
 }
 
+#[allow(dead_code)]
 #[instrument(skip_all)]
 pub async fn count_remaining_outbox_tasks(pool: &Pool) -> Result<i64> {
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM outbox")
@@ -616,5 +590,20 @@ mod tests {
         if let Some((oid, _u, _k, _r, attempt)) = next_due_outbox(&pool).await.unwrap() {
             backoff_outbox(&pool, oid, attempt).await.unwrap();
         }
+    }
+
+    pub async fn backoff_outbox(pool: &Pool, id: i64, attempt: i32) -> Result<()> {
+        // Exponential backoff: 5s * 2^attempt, capped at 3600s
+        let secs = (5_i64) * (1_i64 << attempt.min(10));
+        let secs = secs.min(3600);
+        sqlx::query(
+            "UPDATE outbox SET attempt = ?, due_at = datetime('now', ? || ' seconds') WHERE id = ?",
+        )
+        .bind(attempt + 1)
+        .bind(secs)
+        .bind(id)
+        .execute(pool)
+        .await?;
+        Ok(())
     }
 }

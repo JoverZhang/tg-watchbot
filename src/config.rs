@@ -95,6 +95,7 @@ impl Config {
 
     /// Convenience accessor that maps configuration fields into the `NotionIds`
     /// structure required by the Notion client when constructing payloads.
+    #[allow(dead_code)]
     pub fn notion_ids(&self) -> NotionIds {
         NotionIds {
             main_db: self.notion.databases.main.id.clone(),
@@ -203,6 +204,7 @@ fn expand_tilde(path: &str) -> String {
 }
 
 /// Returns the exact example YAML content requested.
+#[allow(dead_code)]
 pub fn example() -> &'static str {
     // Keep exactly as provided.
     r#"app:

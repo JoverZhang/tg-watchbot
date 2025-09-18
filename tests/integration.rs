@@ -8,6 +8,7 @@ use tg_watchbot::outbox::process_next_task;
 use tokio::sync::Mutex;
 use tokio::time::Duration;
 
+#[cfg(test)]
 fn load_notion_ids() -> NotionIds {
     let cfg: config::Config = serde_yaml::from_str(config::example()).unwrap();
     cfg.notion_ids()
