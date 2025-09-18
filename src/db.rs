@@ -1,8 +1,8 @@
 use crate::model::{BatchState, OutboxKind};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
-use sqlx::{sqlite::SqliteRow, Sqlite, SqlitePool};
 use sqlx::{Row, Transaction};
+use sqlx::{Sqlite, SqlitePool};
 use tracing::instrument;
 
 pub type Pool = SqlitePool;
@@ -35,7 +35,7 @@ fn prepare_sqlite_url(url: &str) -> String {
 
     // Strip prefix and optional //
     let rest = &url["sqlite:".len()..];
-    let (had_slashes, path_with_query) = if let Some(r) = rest.strip_prefix("//") {
+    let (_had_slashes, path_with_query) = if let Some(r) = rest.strip_prefix("//") {
         (true, r)
     } else {
         (false, rest)
@@ -225,14 +225,24 @@ pub async fn insert_resource(
     tg_message_id: i32,
 ) -> Result<i64> {
     let mut tx = pool.begin().await?;
+    let sequence = tg_message_id as i64;
+    let text_value = if kind == "text" {
+        Some(content.to_string())
+    } else {
+        None
+    };
     let rec = sqlx::query(
-        "INSERT INTO resources (user_id, batch_id, kind, content, tg_message_id) VALUES (?, ?, ?, ?, ?) RETURNING id",
+        "INSERT INTO resources (user_id, batch_id, kind, content, tg_message_id, sequence, text, media_name, media_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
     )
     .bind(user_id)
     .bind(batch_id)
     .bind(kind)
     .bind(content)
     .bind(tg_message_id)
+    .bind(sequence)
+    .bind(text_value)
+    .bind::<Option<String>>(None)
+    .bind::<Option<String>>(None)
     .fetch_one(&mut *tx)
     .await?;
     let id: i64 = rec.get("id");
@@ -246,15 +256,135 @@ pub async fn insert_resource(
     Ok(id)
 }
 
-/// Compute the next sequence number for a resource within a batch.
-/// Currently implemented as the count of existing resources for the batch.
-pub async fn next_resource_sequence(pool: &Pool, batch_id: i64) -> Result<i64> {
-    let cnt: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM resources WHERE batch_id = ?")
+#[derive(Debug, Clone)]
+pub struct BatchForOutbox {
+    pub state: BatchState,
+    pub title: Option<String>,
+    pub notion_page_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResourceForOutbox {
+    pub batch_id: Option<i64>,
+    pub sequence: i64,
+    pub text: Option<String>,
+    pub media_name: Option<String>,
+    pub media_url: Option<String>,
+    pub notion_page_id: Option<String>,
+    pub batch_state: Option<BatchState>,
+    pub batch_notion_page_id: Option<String>,
+}
+
+pub async fn fetch_batch_for_outbox(pool: &Pool, batch_id: i64) -> Result<BatchForOutbox> {
+    let row =
+        sqlx::query("SELECT id, user_id, state, title, notion_page_id FROM batches WHERE id = ?")
+            .bind(batch_id)
+            .fetch_optional(pool)
+            .await?;
+
+    let Some(row) = row else {
+        return Err(anyhow!("batch {} not found", batch_id));
+    };
+
+    let state_str: String = row.get("state");
+    let state = BatchState::from_str(&state_str)
+        .ok_or_else(|| anyhow!("batch {} has unknown state {}", batch_id, state_str))?;
+
+    Ok(BatchForOutbox {
+        state,
+        title: row.try_get("title").ok(),
+        notion_page_id: row.try_get::<String, _>("notion_page_id").ok().filter(|s| !s.trim().is_empty()),
+    })
+}
+
+pub async fn fetch_resource_for_outbox(pool: &Pool, resource_id: i64) -> Result<ResourceForOutbox> {
+    let row = sqlx::query(
+        "SELECT r.id, r.user_id, r.batch_id, r.sequence, r.text, r.media_name, r.media_url, \
+                r.notion_page_id, r.kind, r.content, r.tg_message_id, \
+                b.state AS batch_state, b.notion_page_id AS batch_notion_page_id \
+         FROM resources r \
+         LEFT JOIN batches b ON r.batch_id = b.id \
+         WHERE r.id = ?",
+    )
+    .bind(resource_id)
+    .fetch_optional(pool)
+    .await?;
+
+    let Some(row) = row else {
+        return Err(anyhow!("resource {} not found", resource_id));
+    };
+
+    let sequence = row
+        .try_get::<Option<i64>, _>("sequence")
+        .ok()
+        .flatten()
+        .filter(|seq| *seq > 0)
+        .unwrap_or_else(|| row.get::<i32, _>("tg_message_id") as i64);
+
+    let kind: String = row.get("kind");
+    let content: String = row.get("content");
+    let text: Option<String> = row
+        .try_get::<Option<String>, _>("text")
+        .ok()
+        .flatten()
+        .filter(|s| !s.is_empty());
+    let text = text.or_else(|| {
+        if kind == "text" {
+            Some(content.clone())
+        } else {
+            None
+        }
+    });
+
+    let batch_state = row
+        .try_get::<Option<String>, _>("batch_state")
+        .ok()
+        .flatten()
+        .and_then(|s| BatchState::from_str(&s));
+
+    Ok(ResourceForOutbox {
+        batch_id: row.try_get::<Option<i64>, _>("batch_id").ok().flatten(),
+        sequence,
+        text,
+        media_name: row
+            .try_get::<Option<String>, _>("media_name")
+            .ok()
+            .flatten(),
+        media_url: row.try_get::<Option<String>, _>("media_url").ok().flatten(),
+        notion_page_id: row
+            .try_get::<Option<String>, _>("notion_page_id")
+            .ok()
+            .flatten(),
+        batch_state,
+        batch_notion_page_id: row
+            .try_get::<Option<String>, _>("batch_notion_page_id")
+            .ok()
+            .flatten(),
+    })
+}
+
+pub async fn mark_batch_notion_page_id(pool: &Pool, batch_id: i64, page_id: &str) -> Result<()> {
+    sqlx::query("UPDATE batches SET notion_page_id = ? WHERE id = ?")
+        .bind(page_id)
         .bind(batch_id)
-        .fetch_one(pool)
+        .execute(pool)
         .await
-        .unwrap_or(0);
-    Ok(cnt)
+        .context("failed to persist batch notion page")?;
+    Ok(())
+}
+
+pub async fn mark_resource_notion_page_id(
+    pool: &Pool,
+    resource_id: i64,
+    page_id: &str,
+) -> Result<()> {
+    sqlx::query("UPDATE resources SET notion_page_id = ? WHERE id = ?")
+        .bind(page_id)
+        .bind(resource_id)
+        .execute(pool)
+        .await
+        .context("failed to persist resource notion page")?;
+    Ok(())
 }
 
 #[instrument(skip_all)]
@@ -293,7 +423,7 @@ async fn enqueue_outbox_tx(
 #[instrument(skip_all)]
 pub async fn next_due_outbox(pool: &Pool) -> Result<Option<(i64, i64, String, i64, i32)>> {
     let row = sqlx::query(
-        "SELECT id, user_id, kind, ref_id, attempt FROM outbox WHERE datetime(due_at) <= CURRENT_TIMESTAMP ORDER BY datetime(due_at) ASC LIMIT 1",
+        "SELECT id, user_id, kind, ref_id, attempt FROM outbox WHERE datetime(due_at) <= CURRENT_TIMESTAMP ORDER BY (CASE WHEN kind = 'push_batch' THEN 0 ELSE 1 END), datetime(due_at) ASC LIMIT 1",
     )
     .fetch_optional(pool)
     .await?;
@@ -307,6 +437,25 @@ pub async fn next_due_outbox(pool: &Pool) -> Result<Option<(i64, i64, String, i6
     } else {
         Ok(None)
     }
+}
+
+pub async fn list_due_outbox(pool: &Pool) -> Result<Vec<(i64, String, i64)>> {
+    let rows = sqlx::query(
+        "SELECT id, kind, ref_id FROM outbox WHERE datetime(due_at) <= CURRENT_TIMESTAMP ORDER BY datetime(due_at) ASC",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let tasks = rows
+        .into_iter()
+        .map(|row| {
+            let id: i64 = row.get("id");
+            let kind: String = row.get("kind");
+            let ref_id: i64 = row.get("ref_id");
+            (id, kind, ref_id)
+        })
+        .collect();
+    Ok(tasks)
 }
 
 #[instrument(skip_all)]
@@ -385,11 +534,11 @@ mod tests {
         assert_eq!(current_open_batch_id(&pool, uid).await.unwrap(), Some(bid));
 
         // insert resource in batch
-        let rid = insert_resource(&pool, uid, Some(bid), "text", "hello", 1)
+        let _rid = insert_resource(&pool, uid, Some(bid), "text", "hello", 1)
             .await
             .unwrap();
         // standalone should enqueue outbox
-        let rid2 = insert_resource(&pool, uid, None, "text", "single", 2)
+        let _rid2 = insert_resource(&pool, uid, None, "text", "single", 2)
             .await
             .unwrap();
 

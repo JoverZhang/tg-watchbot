@@ -1,4 +1,5 @@
 //! Configuration loader and validator for the Telegram→Notion bot.
+use crate::notion::NotionIds;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -88,6 +89,20 @@ impl Config {
             return Ok(());
         }
         fs::create_dir_all(self.app.resolved_data_dir())
+    }
+
+    /// Convenience accessor that maps configuration fields into the `NotionIds`
+    /// structure required by the Notion client when constructing payloads.
+    pub fn notion_ids(&self) -> NotionIds {
+        NotionIds {
+            main_db: self.notion.databases.main.id.clone(),
+            resource_db: self.notion.databases.resource.id.clone(),
+            f_main_title: self.notion.databases.main.fields.title.clone(),
+            f_rel_parent: self.notion.databases.resource.fields.relation.clone(),
+            f_res_order: self.notion.databases.resource.fields.order.clone(),
+            f_res_text: self.notion.databases.resource.fields.text.clone(),
+            f_res_media: self.notion.databases.resource.fields.media.clone(),
+        }
     }
 }
 
@@ -215,7 +230,6 @@ notion:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     use tempfile::tempdir;
 
     #[test]
@@ -227,7 +241,6 @@ mod tests {
     #[test]
     fn invalid_bot_token() {
         let mut cfg: Config = serde_yaml::from_str(example()).unwrap();
-        let mut cfg = cfg;
         cfg.telegram.bot_token = "".into();
         let err = validate(&cfg).unwrap_err();
         match err {

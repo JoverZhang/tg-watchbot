@@ -40,13 +40,19 @@ async fn main() -> Result<()> {
     db::run_migrations(&pool).await?;
 
     // Spawn outbox worker (single-threaded)
-    let notion_client = notion::RealNotionClient::from_config(&cfg);
+    let notion_client =
+        notion::NotionClient::new(cfg.notion.token.clone(), cfg.notion.version.clone());
+    let notion_ids = cfg.notion_ids();
     let worker_pool = pool.clone();
     let poll_sleep = Duration::from_millis(cfg.app.poll_interval_ms);
     let max_backoff = cfg.app.max_backoff_seconds as i64;
+    let worker_client = notion_client.clone();
+    let worker_ids = notion_ids.clone();
     tokio::spawn(async move {
         loop {
-            match outbox::process_next_task(&worker_pool, &notion_client, max_backoff).await {
+            match outbox::process_next_task(&worker_pool, &worker_client, &worker_ids, max_backoff)
+                .await
+            {
                 Ok(processed) => {
                     if !processed {
                         tokio::time::sleep(poll_sleep).await;

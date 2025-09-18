@@ -16,6 +16,15 @@ impl BatchState {
             BatchState::ROLLED_BACK => "ROLLED_BACK",
         }
     }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "OPEN" => Some(BatchState::OPEN),
+            "COMMITTED" => Some(BatchState::COMMITTED),
+            "ROLLED_BACK" => Some(BatchState::ROLLED_BACK),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

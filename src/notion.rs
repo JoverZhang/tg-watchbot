@@ -1,185 +1,348 @@
-use crate::config::Config;
-use crate::model::{BatchState, OutboxKind};
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use reqwest::StatusCode;
-use serde::Serialize;
-use sqlx::{Row, SqlitePool};
-use tracing::instrument;
+use reqwest::{Client, StatusCode, Url};
+use serde::Deserialize;
+use serde_json::{json, Map, Value};
+use std::fmt;
+use tracing::debug;
+
+const NOTION_API_BASE: &str = "https://api.notion.com/";
+
+#[derive(Clone)]
+pub struct NotionClient {
+    http: Client,
+    base_url: Url,
+    token: String,
+    version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NotionIds {
+    pub main_db: String,
+    pub resource_db: String,
+    pub f_main_title: String,
+    pub f_rel_parent: String,
+    pub f_res_order: String,
+    pub f_res_text: String,
+    pub f_res_media: String,
+}
+
+impl fmt::Debug for NotionClient {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NotionClient")
+            .field("base_url", &self.base_url)
+            .finish_non_exhaustive()
+    }
+}
 
 #[async_trait]
-pub trait NotionClient: Send + Sync {
-    async fn push_batch(&self, pool: &SqlitePool, batch_id: i64) -> Result<String>;
-    async fn push_resource(&self, pool: &SqlitePool, resource_id: i64) -> Result<String>;
+pub trait NotionService: Send + Sync {
+    async fn create_main_page(&self, ids: &NotionIds, title: &str) -> Result<String>;
+
+    async fn create_resource_page(
+        &self,
+        ids: &NotionIds,
+        parent_main_page_id: Option<&str>,
+        order: i64,
+        text: Option<&str>,
+        media_name: Option<&str>,
+        media_url: Option<&str>,
+    ) -> Result<String>;
 }
 
-pub struct RealNotionClient {
-    http: reqwest::Client,
-    notion_token: String,
-    notion_version: String,
-    batches_db: String,
-    resources_db: String,
-    main_title_field: String,
-    res_relation_field: String,
-    res_order_field: String,
-    res_text_field: String,
-    res_media_field: String,
-}
+impl NotionClient {
+    pub fn new(token: String, version: String) -> Self {
+        let base_url = Url::parse(NOTION_API_BASE).expect("valid default Notion URL");
+        Self::with_base_url(token, version, base_url)
+    }
 
-impl RealNotionClient {
-    pub fn from_config(cfg: &Config) -> Self {
-        let http = reqwest::Client::builder()
+    pub fn with_base_url(token: String, version: String, base_url: Url) -> Self {
+        let http = Client::builder()
             .user_agent("tg-watchbot/0.1")
+            .no_proxy()
             .build()
             .expect("reqwest client");
-        let notion_token = cfg.notion.token.clone();
-        let notion_version = cfg.notion.version.clone();
-        let batches_db = cfg.notion.databases.main.id.clone();
-        let resources_db = cfg.notion.databases.resource.id.clone();
-        let main_title_field = cfg.notion.databases.main.fields.title.clone();
-        let res_relation_field = cfg.notion.databases.resource.fields.relation.clone();
-        let res_order_field = cfg.notion.databases.resource.fields.order.clone();
-        let res_text_field = cfg.notion.databases.resource.fields.text.clone();
-        let res_media_field = cfg.notion.databases.resource.fields.media.clone();
         Self {
             http,
-            notion_token,
-            notion_version,
-            batches_db,
-            resources_db,
-            main_title_field,
-            res_relation_field,
-            res_order_field,
-            res_text_field,
-            res_media_field,
+            base_url,
+            token,
+            version,
         }
     }
 
-    async fn create_page(&self, parent_db: &str, properties: serde_json::Value) -> Result<String> {
-        #[derive(Serialize)]
-        struct Req<'a> {
-            parent: Parent<'a>,
-            properties: serde_json::Value,
-        }
-        #[derive(Serialize)]
-        struct Parent<'a> {
-            database_id: &'a str,
-        }
+    pub fn build_request(&self, body: &Value) -> Result<reqwest::Request> {
+        let endpoint = self
+            .base_url
+            .join("v1/pages")
+            .context("invalid Notion base URL")?;
+        self.http
+            .post(endpoint)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Notion-Version", &self.version)
+            .header("Content-Type", "application/json")
+            .json(body)
+            .build()
+            .context("failed to build Notion request")
+    }
 
-        if self.notion_token.is_empty() || parent_db.is_empty() {
-            return Err(anyhow!("Notion configuration missing"));
-        }
-        let req = Req {
-            parent: Parent {
-                database_id: parent_db,
-            },
-            properties,
-        };
+    async fn execute_create(&self, body: Value) -> Result<String> {
+        let request = self.build_request(&body)?;
+        debug!(url=%request.url(), payload=%body, "sending notion request");
         let res = self
             .http
-            .post("https://api.notion.com/v1/pages")
-            .header("Authorization", format!("Bearer {}", self.notion_token))
-            .header("Notion-Version", &self.notion_version)
-            .json(&req)
-            .send()
-            .await?;
+            .execute(request)
+            .await
+            .context("failed to reach Notion")?;
+
         if res.status() == StatusCode::TOO_MANY_REQUESTS {
-            return Err(anyhow!("rate limited"));
+            let body = res.text().await.unwrap_or_default();
+            return Err(anyhow!("received 429 from Notion: {}", body));
         }
         if !res.status().is_success() {
+            let status = res.status();
             let body = res.text().await.unwrap_or_default();
-            return Err(anyhow!("notion error: {}", body));
+            return Err(anyhow!("notion error {}: {}", status, body));
         }
-        let v: serde_json::Value = res.json().await?;
-        Ok(v.get("id")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .to_string())
+
+        let payload: CreatePageResponse = res.json().await.context("invalid Notion response")?;
+        Ok(payload.id)
+    }
+
+    pub async fn create_main_page(&self, ids: &NotionIds, title: &str) -> Result<String> {
+        let body = build_main_page_request(ids, title);
+        self.execute_create(body).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_resource_page(
+        &self,
+        ids: &NotionIds,
+        parent_main_page_id: Option<&str>,
+        order: i64,
+        text: Option<&str>,
+        media_name: Option<&str>,
+        media_url: Option<&str>,
+    ) -> Result<String> {
+        let body = build_resource_page_request(
+            ids,
+            parent_main_page_id,
+            order,
+            text,
+            media_name,
+            media_url,
+        );
+        self.execute_create(body).await
     }
 }
 
 #[async_trait]
-impl NotionClient for RealNotionClient {
-    #[instrument(skip_all)]
-    async fn push_batch(&self, pool: &SqlitePool, batch_id: i64) -> Result<String> {
-        let row = sqlx::query("SELECT title FROM batches WHERE id = ?")
-            .bind(batch_id)
-            .fetch_one(pool)
-            .await?;
-        let title: Option<String> = row.try_get("title").ok();
-        let title = title.unwrap_or_else(|| "Untitled Batch".to_string());
-        let props = serde_json::json!({
-            self.main_title_field.clone(): { "title": [{"text": {"content": title}}] }
-        });
-        let page_id = self.create_page(&self.batches_db, props).await?;
-        sqlx::query("UPDATE batches SET notion_page_id = ? WHERE id = ?")
-            .bind(&page_id)
-            .bind(batch_id)
-            .execute(pool)
-            .await?;
-        Ok(page_id)
+impl NotionService for NotionClient {
+    async fn create_main_page(&self, ids: &NotionIds, title: &str) -> Result<String> {
+        NotionClient::create_main_page(self, ids, title).await
     }
 
-    #[instrument(skip_all)]
-    async fn push_resource(&self, pool: &SqlitePool, resource_id: i64) -> Result<String> {
-        let r = sqlx::query(
-            "SELECT resources.kind, resources.content, resources.batch_id, batches.notion_page_id \
-             FROM resources LEFT JOIN batches ON resources.batch_id = batches.id WHERE resources.id = ?",
+    async fn create_resource_page(
+        &self,
+        ids: &NotionIds,
+        parent_main_page_id: Option<&str>,
+        order: i64,
+        text: Option<&str>,
+        media_name: Option<&str>,
+        media_url: Option<&str>,
+    ) -> Result<String> {
+        NotionClient::create_resource_page(
+            self,
+            ids,
+            parent_main_page_id,
+            order,
+            text,
+            media_name,
+            media_url,
         )
-        .bind(resource_id)
-        .fetch_one(pool)
-        .await?;
-        let kind: String = r.get("kind");
-        let content: String = r.get("content");
-        let notion_page_id: Option<String> = r.try_get("notion_page_id").ok();
-        let mut props = serde_json::json!({});
-        if let Some(page_id) = notion_page_id {
-            props[&self.res_relation_field] = serde_json::json!({"relation": [{"id": page_id}]});
-        }
-        if let Some(batch_id) = r.try_get::<i64, _>("batch_id").ok() {
-            let cnt = crate::db::next_resource_sequence(pool, batch_id)
-                .await
-                .unwrap_or(0);
-            props[&self.res_order_field] = serde_json::json!({"number": cnt});
-        }
-        match kind.as_str() {
-            "text" => {
-                props[&self.res_text_field] =
-                    serde_json::json!({ "rich_text": [{"text": {"content": content}}] });
-            }
-            _ => {
-                props[&self.res_media_field] =
-                    serde_json::json!({ "rich_text": [{"text": {"content": content}}] });
-            }
-        }
-        let page_id = self.create_page(&self.resources_db, props).await?;
-        Ok(page_id)
+        .await
     }
 }
 
-// A simple mock that records calls, used in tests.
-pub struct MockNotionClient {
-    pub pushed_batches: tokio::sync::Mutex<Vec<i64>>,
-    pub pushed_resources: tokio::sync::Mutex<Vec<i64>>,
+pub fn build_main_page_request(ids: &NotionIds, title: &str) -> Value {
+    let mut properties = Map::new();
+    properties.insert(
+        ids.f_main_title.clone(),
+        json!({
+            "title": [
+                {
+                    "text": {
+                        "content": title,
+                    }
+                }
+            ]
+        }),
+    );
+
+    json!({
+        "parent": { "database_id": ids.main_db },
+        "properties": Value::Object(properties),
+    })
 }
 
-impl Default for MockNotionClient {
-    fn default() -> Self {
-        Self {
-            pushed_batches: Default::default(),
-            pushed_resources: Default::default(),
+pub fn build_resource_page_request(
+    ids: &NotionIds,
+    parent_main_page_id: Option<&str>,
+    order: i64,
+    text: Option<&str>,
+    media_name: Option<&str>,
+    media_url: Option<&str>,
+) -> Value {
+    let mut properties = Map::new();
+    if let Some(parent_id) = parent_main_page_id {
+        properties.insert(
+            ids.f_rel_parent.clone(),
+            json!({ "relation": [{ "id": parent_id }] }),
+        );
+    }
+
+    properties.insert(
+        ids.f_res_order.clone(),
+        json!({
+            "number": order,
+        }),
+    );
+
+    if let Some(text_content) = text.filter(|t| !t.is_empty()) {
+        properties.insert(
+            ids.f_res_text.clone(),
+            json!({
+                "rich_text": [
+                    {
+                        "text": {
+                            "content": text_content,
+                        }
+                    }
+                ]
+            }),
+        );
+    }
+
+    if let Some(url) = media_url.filter(|url| !url.is_empty()) {
+        let name = media_name.filter(|name| !name.is_empty()).unwrap_or(url);
+        properties.insert(
+            ids.f_res_media.clone(),
+            json!({
+                "files": [
+                    {
+                        "name": name,
+                        "type": "external",
+                        "external": { "url": url }
+                    }
+                ]
+            }),
+        );
+    }
+
+    json!({
+        "parent": { "database_id": ids.resource_db },
+        "properties": Value::Object(properties),
+    })
+}
+
+#[derive(Deserialize)]
+struct CreatePageResponse {
+    id: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn sample_ids() -> NotionIds {
+        NotionIds {
+            main_db: "main-db".into(),
+            resource_db: "resource-db".into(),
+            f_main_title: "main-title".into(),
+            f_rel_parent: "rel-parent".into(),
+            f_res_order: "res-order".into(),
+            f_res_text: "res-text".into(),
+            f_res_media: "res-media".into(),
         }
     }
-}
 
-#[async_trait]
-impl NotionClient for MockNotionClient {
-    async fn push_batch(&self, _pool: &SqlitePool, batch_id: i64) -> Result<String> {
-        self.pushed_batches.lock().await.push(batch_id);
-        Ok(format!("batch:{}", batch_id))
+    #[test]
+    fn build_main_page_request_includes_title() {
+        let ids = sample_ids();
+        let body = build_main_page_request(&ids, "hello");
+        assert_eq!(body["parent"]["database_id"], "main-db");
+        assert_eq!(
+            body["properties"]["main-title"]["title"][0]["text"]["content"],
+            "hello"
+        );
     }
-    async fn push_resource(&self, _pool: &SqlitePool, resource_id: i64) -> Result<String> {
-        self.pushed_resources.lock().await.push(resource_id);
-        Ok(format!("res:{}", resource_id))
+
+    #[test]
+    fn build_resource_page_request_handles_all_fields() {
+        let ids = sample_ids();
+        let body = build_resource_page_request(
+            &ids,
+            Some("parent-1"),
+            3,
+            Some("details"),
+            Some("a.jpg"),
+            Some("https://cdn/a.jpg"),
+        );
+
+        assert_eq!(body["parent"]["database_id"], "resource-db");
+        assert_eq!(
+            body["properties"]["rel-parent"]["relation"][0]["id"],
+            "parent-1"
+        );
+        assert_eq!(body["properties"]["res-order"]["number"], 3);
+        assert_eq!(
+            body["properties"]["res-text"]["rich_text"][0]["text"]["content"],
+            "details"
+        );
+        assert_eq!(
+            body["properties"]["res-media"]["files"][0]["external"]["url"],
+            "https://cdn/a.jpg"
+        );
+    }
+
+    #[test]
+    fn build_resource_page_request_omits_optional_fields() {
+        let ids = sample_ids();
+        let body = build_resource_page_request(&ids, None, 7, None, None, None);
+        assert_eq!(body["properties"]["res-order"]["number"], 7);
+        assert!(body["properties"].get("rel-parent").is_none());
+        assert!(body["properties"].get("res-text").is_none());
+        assert!(body["properties"].get("res-media").is_none());
+    }
+
+    #[test]
+    fn build_request_sets_headers() {
+        let client = NotionClient::new("token".into(), "2022-06-28".into());
+        let body = json!({ "sample": true });
+        let request = client.build_request(&body).unwrap();
+        assert_eq!(request.method(), reqwest::Method::POST);
+        assert_eq!(request.url().path(), "/v1/pages");
+        let headers = request.headers();
+        assert_eq!(
+            headers
+                .get("Authorization")
+                .and_then(|h| h.to_str().ok())
+                .unwrap(),
+            "Bearer token"
+        );
+        assert_eq!(
+            headers
+                .get("Notion-Version")
+                .and_then(|h| h.to_str().ok())
+                .unwrap(),
+            "2022-06-28"
+        );
+        assert_eq!(
+            headers
+                .get("Content-Type")
+                .and_then(|h| h.to_str().ok())
+                .unwrap(),
+            "application/json"
+        );
     }
 }
