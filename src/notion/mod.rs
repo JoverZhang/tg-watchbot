@@ -12,7 +12,7 @@ use tracing::{debug, info, warn};
 use crate::config::Config;
 use crate::notion::model::RetrieveDatabaseResp;
 
-mod model;
+pub mod model;
 
 const NOTION_API_BASE: &str = "https://api.notion.com/";
 

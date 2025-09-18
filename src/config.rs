@@ -64,6 +64,8 @@ pub struct DbMain {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DbMainFields {
     pub title: String,
+    /// Unique property in main database (name or id) used to look up a row
+    pub unique: String,
 }
 
 /// Resource database mapping.
@@ -147,6 +149,11 @@ fn validate(cfg: &Config) -> Result<(), ConfigError> {
             "notion.databases.main.fields.title must be non-empty",
         ));
     }
+    if cfg.notion.databases.main.fields.unique.trim().is_empty() {
+        return Err(ConfigError::Invalid(
+            "notion.databases.main.fields.unique must be non-empty",
+        ));
+    }
 
     if cfg.notion.databases.resource.id.trim().is_empty() {
         return Err(ConfigError::Invalid(
@@ -217,6 +224,7 @@ notion:
       id: "NOTION_MAIN_DATABASE_ID"
       fields:
         title: "title"
+        unique: "unique"
     resource:
       id: "NOTION_RESOURCE_DATABASE_ID"
       fields:
