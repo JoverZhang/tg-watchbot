@@ -5,15 +5,10 @@ use std::time::Duration;
 use teloxide::prelude::*;
 use tracing::{error, info};
 
-mod config;
-mod db;
-mod handlers;
-mod model;
-mod notion;
-mod outbox;
+use tg_watchbot::{config, db, handlers, notion, outbox};
 
 #[derive(Debug, Parser)]
-#[command(author, version, about)]
+#[command(author, version, about = "Run tg-watchbot (Telegram → Notion)")]
 struct Args {
     /// Path to YAML config file
     #[arg(long, default_value = "config.yaml")]
@@ -42,7 +37,6 @@ async fn main() -> Result<()> {
     // Spawn outbox worker (single-threaded)
     let notion_client =
         notion::NotionClient::new(cfg.notion.token.clone(), cfg.notion.version.clone());
-    // Resolve Notion property IDs at startup; builders will use property IDs as keys.
     let notion_ids = notion_client.resolve_property_ids(&cfg).await?;
     let worker_pool = pool.clone();
     let poll_sleep = Duration::from_millis(cfg.app.poll_interval_ms);
@@ -84,3 +78,4 @@ async fn main() -> Result<()> {
 
     Ok(())
 }
+

@@ -216,14 +216,14 @@ notion:
     main:
       id: "NOTION_MAIN_DATABASE_ID"
       fields:
-        title: "标题"
+        title: "title"
     resource:
       id: "NOTION_RESOURCE_DATABASE_ID"
       fields:
-        relation: "关联主表"
-        order: "序号"
-        text: "文本"
-        media: "图片/视频"
+        relation: "rel-parent"
+        order: "res-order"
+        text: "res-text"
+        media: "res-media"
 "#
 }
 

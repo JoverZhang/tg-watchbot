@@ -41,7 +41,12 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let cfg = config::load(Some(&args.config))?;
     cfg.ensure_dirs()?;
-    let notion_ids = Arc::new(cfg.notion_ids());
+    // Resolve Notion property IDs at startup
+    let notion_client = tg_watchbot::notion::NotionClient::new(
+        cfg.notion.token.clone(),
+        cfg.notion.version.clone(),
+    );
+    let notion_ids = Arc::new(notion_client.resolve_property_ids(&cfg).await?);
 
     let data_dir = cfg.app.resolved_data_dir();
     let database_url = std::env::var("DATABASE_URL")

@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build
+        run: cargo build --workspace --all-targets
+
+      - name: Test (skip live Notion)
+        run: cargo test --workspace -- --skip notion_it
+
+      - name: Live Notion integration (optional)
+        if: ${{ secrets.TG_WATCHBOT_CONFIG_YAML != '' }}
+        env:
+          CI_CONFIG: ${{ secrets.TG_WATCHBOT_CONFIG_YAML }}
+        run: |
+          # Write config.yaml from secret
+          echo "$CI_CONFIG" > config.yaml
+          # Run only the Notion integration test with verbose output
+          cargo test --test notion_it -- --nocapture
+

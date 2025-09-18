@@ -7,6 +7,7 @@ use std::fmt;
 use tracing::{debug, info, warn};
 
 use crate::notion::model::RetrieveDatabaseResp;
+use crate::config::Config;
 
 mod model;
 
@@ -72,6 +73,37 @@ impl NotionClient {
             token,
             version,
         }
+    }
+
+    /// Resolve property IDs for the configured databases by fetching their
+    /// schemas and mapping display names -> property IDs. Returns `NotionIds`
+    /// whose `f_*` fields are property IDs (not display names).
+    pub async fn resolve_property_ids(&self, cfg: &Config) -> Result<NotionIds> {
+        let main_db = self
+            .retrieve_database(&cfg.notion.databases.main.id)
+            .await
+            .context("failed to retrieve main database schema")?;
+        let res_db = self
+            .retrieve_database(&cfg.notion.databases.resource.id)
+            .await
+            .context("failed to retrieve resource database schema")?;
+
+        let lookup = |db: &RetrieveDatabaseResp, name: &str| -> Result<String> {
+            db.properties
+                .get(name)
+                .map(|p| p.id.clone())
+                .ok_or_else(|| anyhow!("property '{}' not found in Notion database {}", name, db.id))
+        };
+
+        Ok(NotionIds {
+            main_db: cfg.notion.databases.main.id.clone(),
+            resource_db: cfg.notion.databases.resource.id.clone(),
+            f_main_title: cfg.notion.databases.main.fields.title.clone(),
+            f_rel_parent: cfg.notion.databases.resource.fields.relation.clone(),
+            f_res_order: cfg.notion.databases.resource.fields.order.clone(),
+            f_res_text: cfg.notion.databases.resource.fields.text.clone(),
+            f_res_media: cfg.notion.databases.resource.fields.media.clone(),
+        })
     }
 
     pub fn build_request(&self, body: &Value) -> Result<reqwest::Request> {
@@ -251,7 +283,7 @@ pub fn build_resource_page_request(
                     }
                 }
             ]
-        }),
+        })
     );
 
     if let Some(text_content) = text.filter(|t| !t.is_empty()) {
@@ -294,6 +326,65 @@ pub fn build_resource_page_request(
 #[derive(Deserialize)]
 struct CreatePageResponse {
     id: String,
+}
+
+/// Thin façade that binds a `NotionClient` to resolved property IDs. It exposes
+/// small convenience helpers that align with repository needs and the
+/// integration test.
+#[derive(Clone)]
+pub struct NotionFacade {
+    client: NotionClient,
+    ids: NotionIds,
+}
+
+impl NotionFacade {
+    /// Construct a façade by resolving property IDs for the given config.
+    pub async fn new(client: NotionClient, cfg: &Config) -> Result<Self> {
+        let ids = client.resolve_property_ids(cfg).await?;
+        Ok(Self { client, ids })
+    }
+
+    /// Return the resolved IDs (database and property IDs).
+    pub fn ids(&self) -> &NotionIds {
+        &self.ids
+    }
+
+    /// Create a main page and return its Notion page ID.
+    pub async fn create_main_page(&self, title: &str) -> Result<String> {
+        self.client.create_main_page(&self.ids, title).await
+    }
+
+    /// Create a text resource under the optional main page.
+    pub async fn create_resource_text(
+        &self,
+        main_page_id: Option<&str>,
+        order: i64,
+        content: &str,
+    ) -> Result<String> {
+        self.client
+            .create_resource_page(&self.ids, main_page_id, order, Some(content), None, None)
+            .await
+    }
+
+    /// Create a media resource (external URL only) under the optional main page.
+    pub async fn create_resource_media(
+        &self,
+        main_page_id: Option<&str>,
+        order: i64,
+        name: &str,
+        external_url: &str,
+    ) -> Result<String> {
+        self.client
+            .create_resource_page(
+                &self.ids,
+                main_page_id,
+                order,
+                None,
+                Some(name),
+                Some(external_url),
+            )
+            .await
+    }
 }
 
 #[cfg(test)]

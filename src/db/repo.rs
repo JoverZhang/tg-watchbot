@@ -1,4 +1,5 @@
 use crate::model::{BatchState, OutboxKind};
+use super::model::{BatchForOutbox, ResourceForOutbox};
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, Transaction};
@@ -226,19 +227,17 @@ pub async fn insert_resource(
 ) -> Result<i64> {
     let mut tx = pool.begin().await?;
 
-    // Calculate sequence: batch-specific order starting from 1, or 1 if no batch
-    let sequence = if let Some(batch_id) = batch_id {
-        // Get next sequence number for this batch
+    // Calculate sequence for items in a batch (1..N). Standalone items use 1.
+    let sequence_opt: Option<i64> = if let Some(batch_id) = batch_id {
         let max_seq: Option<i64> = sqlx::query_scalar(
-            "SELECT MAX(sequence) FROM resources WHERE batch_id = ?"
+            "SELECT MAX(sequence) FROM resources WHERE batch_id = ?",
         )
         .bind(batch_id)
         .fetch_optional(&mut *tx)
         .await?;
-        max_seq.unwrap_or(0) + 1
+        Some(max_seq.unwrap_or(0) + 1)
     } else {
-        // No batch, always use 1
-        1
+        Some(1)
     };
     let text_value = if kind == "text" {
         Some(content.to_string())
@@ -253,7 +252,7 @@ pub async fn insert_resource(
     .bind(kind)
     .bind(content)
     .bind(tg_message_id)
-    .bind(sequence)
+    .bind(sequence_opt)
     .bind(text_value)
     .bind::<Option<String>>(None)
     .bind::<Option<String>>(None)
@@ -270,24 +269,7 @@ pub async fn insert_resource(
     Ok(id)
 }
 
-#[derive(Debug, Clone)]
-pub struct BatchForOutbox {
-    pub state: BatchState,
-    pub title: Option<String>,
-    pub notion_page_id: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ResourceForOutbox {
-    pub batch_id: Option<i64>,
-    pub sequence: i64,
-    pub text: Option<String>,
-    pub media_name: Option<String>,
-    pub media_url: Option<String>,
-    pub notion_page_id: Option<String>,
-    pub batch_state: Option<BatchState>,
-    pub batch_notion_page_id: Option<String>,
-}
+// View models are declared in `model.rs` to keep repository focused on SQL.
 
 pub async fn fetch_batch_for_outbox(pool: &Pool, batch_id: i64) -> Result<BatchForOutbox> {
     let row =
@@ -328,12 +310,9 @@ pub async fn fetch_resource_for_outbox(pool: &Pool, resource_id: i64) -> Result<
         return Err(anyhow!("resource {} not found", resource_id));
     };
 
-    let sequence = row
-        .try_get::<Option<i64>, _>("sequence")
-        .ok()
-        .flatten()
-        .filter(|seq| *seq > 0)
-        .unwrap_or_else(|| row.get::<i32, _>("tg_message_id") as i64);
+    // For Notion ordering, always preserve original Telegram message order.
+    let batch_id_opt = row.try_get::<Option<i64>, _>("batch_id").ok().flatten();
+    let sequence = row.get::<i32, _>("tg_message_id") as i64;
 
     let kind: String = row.get("kind");
     let content: String = row.get("content");
@@ -357,7 +336,7 @@ pub async fn fetch_resource_for_outbox(pool: &Pool, resource_id: i64) -> Result<
         .and_then(|s| BatchState::from_str(&s));
 
     Ok(ResourceForOutbox {
-        batch_id: row.try_get::<Option<i64>, _>("batch_id").ok().flatten(),
+        batch_id: batch_id_opt,
         sequence,
         text,
         media_name: row

@@ -48,7 +48,7 @@ async fn main() -> Result<()> {
     db::run_migrations(&pool).await?;
 
     let notion_client = NotionClient::new(cfg.notion.token.clone(), cfg.notion.version.clone());
-    let notion_ids = cfg.notion_ids();
+    let notion_ids = notion_client.resolve_property_ids(&cfg).await?;
     let max_backoff = cfg.app.max_backoff_seconds as i64;
 
     info!("Starting Notion sync process");
