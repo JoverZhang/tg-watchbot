@@ -4,7 +4,7 @@ use reqwest::{Client, StatusCode, Url};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::fmt;
-use tracing::debug;
+use tracing::{debug, info, warn};
 
 use crate::notion::model::RetrieveDatabaseResp;
 
@@ -91,24 +91,48 @@ impl NotionClient {
 
     async fn execute_create(&self, body: Value) -> Result<String> {
         let request = self.build_request(&body)?;
-        debug!(url=%request.url(), payload=%body, "sending notion request");
+        info!(url=%request.url(), "=== NOTION API REQUEST ===");
+        info!("Request Headers:");
+        for (name, value) in request.headers() {
+            if name.as_str().to_lowercase().contains("authorization") {
+                info!("  {}: Bearer [REDACTED]", name);
+            } else {
+                info!("  {}: {}", name, value.to_str().unwrap_or("[invalid]"));
+            }
+        }
+        info!("Request Payload: {}", serde_json::to_string_pretty(&body).unwrap_or_else(|_| format!("{:?}", body)));
+
         let res = self
             .http
             .execute(request)
             .await
             .context("failed to reach Notion")?;
 
+        info!("=== NOTION API RESPONSE ===");
+        info!("Response Status: {}", res.status());
+        info!("Response Headers:");
+        for (name, value) in res.headers() {
+            info!("  {}: {}", name, value.to_str().unwrap_or("[invalid]"));
+        }
+
         if res.status() == StatusCode::TOO_MANY_REQUESTS {
             let body = res.text().await.unwrap_or_default();
+            warn!("Rate limited by Notion: {}", body);
             return Err(anyhow!("received 429 from Notion: {}", body));
         }
         if !res.status().is_success() {
             let status = res.status();
             let body = res.text().await.unwrap_or_default();
+            warn!("Notion API error - Status: {}, Body: {}", status, body);
             return Err(anyhow!("notion error {}: {}", status, body));
         }
 
-        let payload: CreatePageResponse = res.json().await.context("invalid Notion response")?;
+        let response_body = res.text().await.context("failed to read Notion response")?;
+        info!("Response Body: {}", response_body);
+
+        let payload: CreatePageResponse = serde_json::from_str(&response_body)
+            .context("invalid Notion response JSON")?;
+        info!("Successfully created Notion page with ID: {}", payload.id);
         Ok(payload.id)
     }
 
@@ -220,7 +244,13 @@ pub fn build_resource_page_request(
     properties.insert(
         ids.f_res_order.clone(),
         json!({
-            "number": order,
+            "title": [
+                {
+                    "text": {
+                        "content": format!("#{}", order),
+                    }
+                }
+            ]
         }),
     );
 

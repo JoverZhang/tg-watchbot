@@ -225,7 +225,21 @@ pub async fn insert_resource(
     tg_message_id: i32,
 ) -> Result<i64> {
     let mut tx = pool.begin().await?;
-    let sequence = tg_message_id as i64;
+
+    // Calculate sequence: batch-specific order starting from 1, or 1 if no batch
+    let sequence = if let Some(batch_id) = batch_id {
+        // Get next sequence number for this batch
+        let max_seq: Option<i64> = sqlx::query_scalar(
+            "SELECT MAX(sequence) FROM resources WHERE batch_id = ?"
+        )
+        .bind(batch_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        max_seq.unwrap_or(0) + 1
+    } else {
+        // No batch, always use 1
+        1
+    };
     let text_value = if kind == "text" {
         Some(content.to_string())
     } else {
@@ -558,4 +572,29 @@ mod tests {
             backoff_outbox(&pool, oid, attempt).await.unwrap();
         }
     }
+}
+
+#[instrument(skip_all)]
+pub async fn get_last_processed_outbox_id(pool: &Pool) -> Result<i64> {
+    let id: i64 = sqlx::query_scalar("SELECT last_processed_outbox_id FROM sync_state WHERE id = 1")
+        .fetch_one(pool)
+        .await?;
+    Ok(id)
+}
+
+#[instrument(skip_all)]
+pub async fn update_last_processed_outbox_id(pool: &Pool, outbox_id: i64) -> Result<()> {
+    sqlx::query("UPDATE sync_state SET last_processed_outbox_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1")
+        .bind(outbox_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+#[instrument(skip_all)]
+pub async fn count_remaining_outbox_tasks(pool: &Pool) -> Result<i64> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM outbox")
+        .fetch_one(pool)
+        .await?;
+    Ok(count)
 }
