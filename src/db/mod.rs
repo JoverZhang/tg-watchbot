@@ -15,4 +15,3 @@ pub use repo::*;
 
 // Surface view models used by callers (e.g., outbox worker).
 pub use model::{BatchForOutbox, ResourceForOutbox};
-

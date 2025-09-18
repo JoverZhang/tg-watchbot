@@ -8,8 +8,8 @@ use std::path::Path;
 use tokio::fs;
 use tracing::{debug, info, warn};
 
-use crate::notion::model::RetrieveDatabaseResp;
 use crate::config::Config;
+use crate::notion::model::RetrieveDatabaseResp;
 
 mod model;
 
@@ -94,7 +94,9 @@ impl NotionClient {
             db.properties
                 .get(name)
                 .map(|p| p.id.clone())
-                .ok_or_else(|| anyhow!("property '{}' not found in Notion database {}", name, db.id))
+                .ok_or_else(|| {
+                    anyhow!("property '{}' not found in Notion database {}", name, db.id)
+                })
         };
 
         Ok(NotionIds {
@@ -134,7 +136,10 @@ impl NotionClient {
                 info!("  {}: {}", name, value.to_str().unwrap_or("[invalid]"));
             }
         }
-        info!("Request Payload: {}", serde_json::to_string_pretty(&body).unwrap_or_else(|_| format!("{:?}", body)));
+        info!(
+            "Request Payload: {}",
+            serde_json::to_string_pretty(&body).unwrap_or_else(|_| format!("{:?}", body))
+        );
 
         let res = self
             .http
@@ -164,8 +169,8 @@ impl NotionClient {
         let response_body = res.text().await.context("failed to read Notion response")?;
         info!("Response Body: {}", response_body);
 
-        let payload: CreatePageResponse = serde_json::from_str(&response_body)
-            .context("invalid Notion response JSON")?;
+        let payload: CreatePageResponse =
+            serde_json::from_str(&response_body).context("invalid Notion response JSON")?;
         info!("Successfully created Notion page with ID: {}", payload.id);
         Ok(payload.id)
     }
@@ -219,15 +224,26 @@ impl NotionClient {
         self.execute_create(body).await
     }
 
-    pub async fn retrieve_database(&self, database_id: &str) -> anyhow::Result<RetrieveDatabaseResp> {
-        let url = self.base_url.join(&format!("v1/databases/{}", database_id))?;
-        let res = self.http
+    pub async fn retrieve_database(
+        &self,
+        database_id: &str,
+    ) -> anyhow::Result<RetrieveDatabaseResp> {
+        let url = self
+            .base_url
+            .join(&format!("v1/databases/{}", database_id))?;
+        let res = self
+            .http
             .get(url)
             .header("Authorization", format!("Bearer {}", self.token))
             .header("Notion-Version", &self.version)
-            .send().await?;
+            .send()
+            .await?;
         if !res.status().is_success() {
-            return Err(anyhow::anyhow!("notion retrieve db error {}: {}", res.status(), res.text().await.unwrap_or_default()));
+            return Err(anyhow::anyhow!(
+                "notion retrieve db error {}: {}",
+                res.status(),
+                res.text().await.unwrap_or_default()
+            ));
         }
         Ok(res.json::<RetrieveDatabaseResp>().await?)
     }
@@ -277,13 +293,12 @@ impl NotionClient {
 
         // Step 2: Send file content
         let content_type = self.get_content_type(file_path);
-        let form = reqwest::multipart::Form::new()
-            .part(
-                "file",
-                reqwest::multipart::Part::bytes(file_content)
-                    .file_name(file_name.to_string())
-                    .mime_str(content_type)?,
-            );
+        let form = reqwest::multipart::Form::new().part(
+            "file",
+            reqwest::multipart::Part::bytes(file_content)
+                .file_name(file_name.to_string())
+                .mime_str(content_type)?,
+        );
 
         let send_res = self
             .http
@@ -303,7 +318,10 @@ impl NotionClient {
 
         // The file is now uploaded and ready to be used
         // Return the file upload ID which can be referenced in page properties
-        info!("Successfully uploaded file: {} with ID: {}", file_name, create_response.id);
+        info!(
+            "Successfully uploaded file: {} with ID: {}",
+            file_name, create_response.id
+        );
         Ok(create_response.id)
     }
 
@@ -396,7 +414,7 @@ pub fn build_resource_page_request(
                     }
                 }
             ]
-        })
+        }),
     );
 
     if let Some(text_content) = text.filter(|t| !t.is_empty()) {
@@ -416,7 +434,9 @@ pub fn build_resource_page_request(
 
     // Handle file uploads (either external URL or uploaded file ID)
     if let Some(upload_id) = file_upload_id.filter(|id| !id.is_empty()) {
-        let name = media_name.filter(|name| !name.is_empty()).unwrap_or("Uploaded file");
+        let name = media_name
+            .filter(|name| !name.is_empty())
+            .unwrap_or("Uploaded file");
         properties.insert(
             ids.f_res_media.clone(),
             json!({

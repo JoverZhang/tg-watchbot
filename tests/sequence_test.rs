@@ -29,7 +29,7 @@ async fn test_sequence_generation_with_batch() {
 
     // Check sequences
     let sequences: Vec<(i64, Option<i64>, i64)> = sqlx::query_as(
-        "SELECT id, batch_id, sequence FROM resources WHERE id IN (?, ?, ?) ORDER BY sequence"
+        "SELECT id, batch_id, sequence FROM resources WHERE id IN (?, ?, ?) ORDER BY sequence",
     )
     .bind(r1)
     .bind(r2)
@@ -73,7 +73,7 @@ async fn test_sequence_generation_without_batch() {
 
     // Check sequences
     let sequences: Vec<(i64, Option<i64>, i64)> = sqlx::query_as(
-        "SELECT id, batch_id, sequence FROM resources WHERE id IN (?, ?, ?) ORDER BY id"
+        "SELECT id, batch_id, sequence FROM resources WHERE id IN (?, ?, ?) ORDER BY id",
     )
     .bind(r1)
     .bind(r2)
@@ -114,33 +114,40 @@ async fn test_sequence_generation_multiple_batches() {
         .unwrap();
 
     // Commit first batch before opening second
-    db::commit_batch(&pool, user_id, Some("Batch 1")).await.unwrap();
+    db::commit_batch(&pool, user_id, Some("Batch 1"))
+        .await
+        .unwrap();
 
     // Create second batch
     let batch2_id = db::open_batch(&pool, user_id).await.unwrap();
     let r3 = db::insert_resource(&pool, user_id, Some(batch2_id), "text", "batch2_item1", 900)
         .await
         .unwrap();
-    let r4 = db::insert_resource(&pool, user_id, Some(batch2_id), "text", "batch2_item2", 1000)
-        .await
-        .unwrap();
+    let r4 = db::insert_resource(
+        &pool,
+        user_id,
+        Some(batch2_id),
+        "text",
+        "batch2_item2",
+        1000,
+    )
+    .await
+    .unwrap();
 
     // Check sequences
-    let batch1_sequences: Vec<(i64, i64)> = sqlx::query_as(
-        "SELECT id, sequence FROM resources WHERE batch_id = ? ORDER BY sequence"
-    )
-    .bind(batch1_id)
-    .fetch_all(&pool)
-    .await
-    .unwrap();
+    let batch1_sequences: Vec<(i64, i64)> =
+        sqlx::query_as("SELECT id, sequence FROM resources WHERE batch_id = ? ORDER BY sequence")
+            .bind(batch1_id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
 
-    let batch2_sequences: Vec<(i64, i64)> = sqlx::query_as(
-        "SELECT id, sequence FROM resources WHERE batch_id = ? ORDER BY sequence"
-    )
-    .bind(batch2_id)
-    .fetch_all(&pool)
-    .await
-    .unwrap();
+    let batch2_sequences: Vec<(i64, i64)> =
+        sqlx::query_as("SELECT id, sequence FROM resources WHERE batch_id = ? ORDER BY sequence")
+            .bind(batch2_id)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
 
     println!("Batch 1 sequences: {:?}", batch1_sequences);
     println!("Batch 2 sequences: {:?}", batch2_sequences);

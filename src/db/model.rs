@@ -25,4 +25,3 @@ pub struct ResourceForOutbox {
     pub batch_state: Option<BatchState>,
     pub batch_notion_page_id: Option<String>,
 }
-

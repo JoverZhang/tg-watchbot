@@ -117,15 +117,19 @@ async fn main() -> Result<()> {
                 break;
             } else {
                 // Check if all remaining tasks are in backoff (failed tasks)
-                let failed_tasks: Vec<(i64, i32, String)> = sqlx::query_as(
-                    "SELECT id, attempt, due_at FROM outbox"
-                )
-                .fetch_all(&pool)
-                .await?;
+                let failed_tasks: Vec<(i64, i32, String)> =
+                    sqlx::query_as("SELECT id, attempt, due_at FROM outbox")
+                        .fetch_all(&pool)
+                        .await?;
 
                 if !failed_tasks.is_empty() {
-                    let max_attempts = failed_tasks.iter().map(|(_, attempt, _)| *attempt).max().unwrap_or(0);
-                    let min_due_time = failed_tasks.iter()
+                    let max_attempts = failed_tasks
+                        .iter()
+                        .map(|(_, attempt, _)| *attempt)
+                        .max()
+                        .unwrap_or(0);
+                    let min_due_time = failed_tasks
+                        .iter()
                         .map(|(_, _, due_at)| due_at.as_str())
                         .min()
                         .unwrap_or("unknown");

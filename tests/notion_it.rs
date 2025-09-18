@@ -38,11 +38,7 @@ async fn notion_it_creates_main_and_resources() -> Result<()> {
 
     // Create a photo resource (upload local file)
     let photo_page = notion
-        .create_resource_media_from_file(
-            Some(&main_page_id),
-            2,
-            "tests/media/test_picture.jpg",
-        )
+        .create_resource_media_from_file(Some(&main_page_id), 2, "tests/media/test_picture.jpg")
         .await?;
     assert!(!photo_page.trim().is_empty());
     println!(
@@ -52,11 +48,7 @@ async fn notion_it_creates_main_and_resources() -> Result<()> {
 
     // Create a video resource (upload local file)
     let video_page = notion
-        .create_resource_media_from_file(
-            Some(&main_page_id),
-            3,
-            "tests/media/video.mp4",
-        )
+        .create_resource_media_from_file(Some(&main_page_id), 3, "tests/media/video.mp4")
         .await?;
     assert!(!video_page.trim().is_empty());
     println!(
@@ -66,4 +58,3 @@ async fn notion_it_creates_main_and_resources() -> Result<()> {
 
     Ok(())
 }
-

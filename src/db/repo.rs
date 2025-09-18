@@ -1,5 +1,5 @@
-use crate::model::{BatchState, OutboxKind};
 use super::model::{BatchForOutbox, ResourceForOutbox};
+use crate::model::{BatchState, OutboxKind};
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use sqlx::{Row, Transaction};
@@ -229,12 +229,11 @@ pub async fn insert_resource(
 
     // Calculate sequence for items in a batch (1..N). Standalone items use 1.
     let sequence_opt: Option<i64> = if let Some(batch_id) = batch_id {
-        let max_seq: Option<i64> = sqlx::query_scalar(
-            "SELECT MAX(sequence) FROM resources WHERE batch_id = ?",
-        )
-        .bind(batch_id)
-        .fetch_optional(&mut *tx)
-        .await?;
+        let max_seq: Option<i64> =
+            sqlx::query_scalar("SELECT MAX(sequence) FROM resources WHERE batch_id = ?")
+                .bind(batch_id)
+                .fetch_optional(&mut *tx)
+                .await?;
         Some(max_seq.unwrap_or(0) + 1)
     } else {
         Some(1)
@@ -289,7 +288,10 @@ pub async fn fetch_batch_for_outbox(pool: &Pool, batch_id: i64) -> Result<BatchF
     Ok(BatchForOutbox {
         state,
         title: row.try_get("title").ok(),
-        notion_page_id: row.try_get::<String, _>("notion_page_id").ok().filter(|s| !s.trim().is_empty()),
+        notion_page_id: row
+            .try_get::<String, _>("notion_page_id")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
     })
 }
 
@@ -555,9 +557,10 @@ mod tests {
 
 #[instrument(skip_all)]
 pub async fn get_last_processed_outbox_id(pool: &Pool) -> Result<i64> {
-    let id: i64 = sqlx::query_scalar("SELECT last_processed_outbox_id FROM sync_state WHERE id = 1")
-        .fetch_one(pool)
-        .await?;
+    let id: i64 =
+        sqlx::query_scalar("SELECT last_processed_outbox_id FROM sync_state WHERE id = 1")
+            .fetch_one(pool)
+            .await?;
     Ok(id)
 }
 

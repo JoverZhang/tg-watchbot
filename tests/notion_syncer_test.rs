@@ -108,10 +108,11 @@ async fn test_syncer_logic_with_real_tasks() {
     assert_eq!(initial_sync_id, 0, "Initial sync ID should be 0");
 
     // Get the actual outbox IDs before processing
-    let outbox_tasks: Vec<(i64, String, i64)> = sqlx::query_as("SELECT id, kind, ref_id FROM outbox ORDER BY id")
-        .fetch_all(&pool)
-        .await
-        .unwrap();
+    let outbox_tasks: Vec<(i64, String, i64)> =
+        sqlx::query_as("SELECT id, kind, ref_id FROM outbox ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     println!("Outbox tasks before processing: {:?}", outbox_tasks);
 
     let max_backoff = 60i64;
@@ -186,10 +187,11 @@ async fn test_syncer_tracks_processed_ids_correctly() {
         .unwrap();
 
     // Get the actual outbox IDs before processing
-    let outbox_tasks: Vec<(i64, String, i64)> = sqlx::query_as("SELECT id, kind, ref_id FROM outbox ORDER BY id")
-        .fetch_all(&pool)
-        .await
-        .unwrap();
+    let outbox_tasks: Vec<(i64, String, i64)> =
+        sqlx::query_as("SELECT id, kind, ref_id FROM outbox ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     println!("Outbox tasks: {:?}", outbox_tasks);
 
     let expected_task_ids: Vec<i64> = outbox_tasks.iter().map(|(id, _, _)| *id).collect();
@@ -211,9 +213,14 @@ async fn test_syncer_tracks_processed_ids_correctly() {
                 processed_count += 1;
                 // Update the last processed ID to the task we just completed
                 last_processed_id = next_task_id;
-                db::update_last_processed_outbox_id(&pool, last_processed_id).await.unwrap();
+                db::update_last_processed_outbox_id(&pool, last_processed_id)
+                    .await
+                    .unwrap();
 
-                println!("Processed task ID: {}, last_processed_id now: {}", next_task_id, last_processed_id);
+                println!(
+                    "Processed task ID: {}, last_processed_id now: {}",
+                    next_task_id, last_processed_id
+                );
             } else {
                 panic!("Task should have been processed successfully");
             }
@@ -283,28 +290,37 @@ async fn test_syncer_respects_failure_threshold() {
             if processed {
                 // Task was "processed" (attempted), but may have failed
                 // Check if the task is still in outbox (indicates failure and backoff)
-                let task_exists: Option<i32> = sqlx::query_scalar("SELECT attempt FROM outbox WHERE id = ?")
-                    .bind(task_id)
-                    .fetch_optional(&pool)
-                    .await
-                    .unwrap();
+                let task_exists: Option<i32> =
+                    sqlx::query_scalar("SELECT attempt FROM outbox WHERE id = ?")
+                        .bind(task_id)
+                        .fetch_optional(&pool)
+                        .await
+                        .unwrap();
 
                 if let Some(current_attempts) = task_exists {
                     println!("Task {} failed, attempts: {}", task_id, current_attempts);
 
                     if current_attempts >= failure_threshold {
-                        println!("Failure threshold ({}) exceeded, stopping", failure_threshold);
+                        println!(
+                            "Failure threshold ({}) exceeded, stopping",
+                            failure_threshold
+                        );
                         break;
                     }
 
                     // Reset due_at to now so we can retry immediately in test
-                    sqlx::query("UPDATE outbox SET due_at = datetime('now', '-1 seconds') WHERE id = ?")
-                        .bind(task_id)
-                        .execute(&pool)
-                        .await
-                        .unwrap();
+                    sqlx::query(
+                        "UPDATE outbox SET due_at = datetime('now', '-1 seconds') WHERE id = ?",
+                    )
+                    .bind(task_id)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
                 } else {
-                    println!("Task {} completed successfully and was removed from outbox", task_id);
+                    println!(
+                        "Task {} completed successfully and was removed from outbox",
+                        task_id
+                    );
                     break; // Task succeeded, no need to continue
                 }
             } else {
@@ -327,9 +343,15 @@ async fn test_syncer_respects_failure_threshold() {
         .await
         .unwrap();
 
-    assert!(final_attempts >= failure_threshold,
+    assert!(
+        final_attempts >= failure_threshold,
         "Task should have exceeded failure threshold. Expected >= {}, got {}",
-        failure_threshold, final_attempts);
+        failure_threshold,
+        final_attempts
+    );
 
-    println!("Test completed successfully. Final attempts: {}", final_attempts);
+    println!(
+        "Test completed successfully. Final attempts: {}",
+        final_attempts
+    );
 }
