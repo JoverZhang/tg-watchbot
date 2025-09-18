@@ -42,13 +42,19 @@ pub async fn print_message_expanded(
         .from()
         .and_then(|u| u.username.clone())
         .unwrap_or_default();
+    let uid = msg.from().map(|u| u.id.0 as i64).unwrap_or(0);
+    let message_id = msg.id.0 as i32;
+    println!("message_id: {}", message_id);
 
     // Text/caption
     if let Some(t) = msg.text() {
-        println!("[chat:{} user:@{}] text: {}", chat_id, user, t);
+        println!("[chat:{} uid:{} user:@{}] text: {}", chat_id, uid, user, t);
     }
     if let Some(c) = msg.caption() {
-        println!("[chat:{} user:@{}] caption: {}", chat_id, user, c);
+        println!(
+            "[chat:{} uid:{} user:@{}] caption: {}",
+            chat_id, uid, user, c
+        );
     }
 
     match &msg.kind {
@@ -78,14 +84,23 @@ pub async fn print_message_expanded(
                     }
                 }
                 MediaKind::Video(v) => {
-                    print_video(bot, bot_token, chat_id, &user, &v.video, resolve_file_path)
-                        .await?;
+                    print_video(
+                        bot,
+                        bot_token,
+                        chat_id,
+                        uid,
+                        &user,
+                        &v.video,
+                        resolve_file_path,
+                    )
+                    .await?;
                 }
                 MediaKind::Document(d) => {
                     print_document(
                         bot,
                         bot_token,
                         chat_id,
+                        uid,
                         &user,
                         &d.document,
                         resolve_file_path,
@@ -97,6 +112,7 @@ pub async fn print_message_expanded(
                         bot,
                         bot_token,
                         chat_id,
+                        uid,
                         &user,
                         &a.animation,
                         resolve_file_path,
@@ -104,18 +120,35 @@ pub async fn print_message_expanded(
                     .await?;
                 }
                 MediaKind::Audio(a) => {
-                    print_audio(bot, bot_token, chat_id, &user, &a.audio, resolve_file_path)
-                        .await?;
+                    print_audio(
+                        bot,
+                        bot_token,
+                        chat_id,
+                        uid,
+                        &user,
+                        &a.audio,
+                        resolve_file_path,
+                    )
+                    .await?;
                 }
                 MediaKind::Voice(v) => {
-                    print_voice(bot, bot_token, chat_id, &user, &v.voice, resolve_file_path)
-                        .await?;
+                    print_voice(
+                        bot,
+                        bot_token,
+                        chat_id,
+                        uid,
+                        &user,
+                        &v.voice,
+                        resolve_file_path,
+                    )
+                    .await?;
                 }
                 MediaKind::VideoNote(vn) => {
                     print_video_note(
                         bot,
                         bot_token,
                         chat_id,
+                        uid,
                         &user,
                         &vn.video_note,
                         resolve_file_path,
@@ -127,6 +160,7 @@ pub async fn print_message_expanded(
                         bot,
                         bot_token,
                         chat_id,
+                        uid,
                         &user,
                         &s.sticker,
                         resolve_file_path,
@@ -135,12 +169,18 @@ pub async fn print_message_expanded(
                 }
                 other => {
                     // Many other types (location, poll, contact...) can be added as needed
-                    println!("[chat:{} user:@{}] other kind: {:?}", chat_id, user, other);
+                    println!(
+                        "[chat:{} uid:{} user:@{}] other kind: {:?}",
+                        chat_id, uid, user, other
+                    );
                 }
             }
         }
         other => {
-            println!("[chat:{} user:@{}] non-common: {:?}", chat_id, user, other);
+            println!(
+                "[chat:{} uid:{} user:@{}] non-common: {:?}",
+                chat_id, uid, user, other
+            );
         }
     }
 
@@ -154,6 +194,7 @@ async fn print_video(
     bot: &Bot,
     token: &str,
     chat_id: i64,
+    uid: i64,
     user: &str,
     v: &Video,
     resolve: bool,
@@ -163,13 +204,13 @@ async fn print_video(
         let f = bot.get_file(file_id.clone()).await?;
         let url = format!("https://api.telegram.org/file/bot{}/{}", token, f.path);
         println!(
-            "[chat:{} user:@{}] video: {}x{} dur={}s size={} file_id={} path={} url={}",
-            chat_id, user, v.width, v.height, v.duration, v.file.size, file_id, f.path, url
+            "[chat:{} uid:{} user:@{}] video: {}x{} dur={}s size={} file_id={} path={} url={}",
+            chat_id, uid, user, v.width, v.height, v.duration, v.file.size, file_id, f.path, url
         );
     } else {
         println!(
-            "[chat:{} user:@{}] video: {}x{} dur={}s size={} file_id={}",
-            chat_id, user, v.width, v.height, v.duration, v.file.size, file_id
+            "[chat:{} uid:{} user:@{}] video: {}x{} dur={}s size={} file_id={}",
+            chat_id, uid, user, v.width, v.height, v.duration, v.file.size, file_id
         );
     }
     Ok(())
@@ -179,6 +220,7 @@ async fn print_document(
     bot: &Bot,
     token: &str,
     chat_id: i64,
+    uid: i64,
     user: &str,
     d: &Document,
     resolve: bool,
@@ -187,12 +229,12 @@ async fn print_document(
     if resolve {
         let f = bot.get_file(file_id.clone()).await?;
         let url = format!("https://api.telegram.org/file/bot{}/{}", token, f.path);
-        println!("[chat:{} user:@{}] document: filename={:?} mime={:?} size={} file_id={} path={} url={}",
-            chat_id, user, d.file_name, d.mime_type, d.file.size, file_id, f.path, url);
+        println!("[chat:{} uid:{} user:@{}] document: filename={:?} mime={:?} size={} file_id={} path={} url={}",
+            chat_id, uid, user, d.file_name, d.mime_type, d.file.size, file_id, f.path, url);
     } else {
         println!(
-            "[chat:{} user:@{}] document: filename={:?} mime={:?} size={} file_id={}",
-            chat_id, user, d.file_name, d.mime_type, d.file.size, file_id
+            "[chat:{} uid:{} user:@{}] document: filename={:?} mime={:?} size={} file_id={}",
+            chat_id, uid, user, d.file_name, d.mime_type, d.file.size, file_id
         );
     }
     Ok(())
@@ -202,6 +244,7 @@ async fn print_animation(
     bot: &Bot,
     token: &str,
     chat_id: i64,
+    uid: i64,
     user: &str,
     a: &Animation,
     resolve: bool,
@@ -210,13 +253,13 @@ async fn print_animation(
     if resolve {
         let f = bot.get_file(file_id.clone()).await?;
         let url = format!("https://api.telegram.org/file/bot{}/{}", token, f.path);
-        println!("[chat:{} user:@{}] animation: {}x{} dur={}s mime={:?} size={} file_id={} path={} url={}",
-            chat_id, user, a.width, a.height, a.duration, a.mime_type, a.file.size,
+        println!("[chat:{} uid:{} user:@{}] animation: {}x{} dur={}s mime={:?} size={} file_id={} path={} url={}",
+            chat_id, uid, user, a.width, a.height, a.duration, a.mime_type, a.file.size,
             file_id, f.path, url);
     } else {
         println!(
-            "[chat:{} user:@{}] animation: {}x{} dur={}s mime={:?} size={} file_id={}",
-            chat_id, user, a.width, a.height, a.duration, a.mime_type, a.file.size, file_id
+            "[chat:{} uid:{} user:@{}] animation: {}x{} dur={}s mime={:?} size={} file_id={}",
+            chat_id, uid, user, a.width, a.height, a.duration, a.mime_type, a.file.size, file_id
         );
     }
     Ok(())
@@ -226,6 +269,7 @@ async fn print_audio(
     bot: &Bot,
     token: &str,
     chat_id: i64,
+    uid: i64,
     user: &str,
     a: &Audio,
     resolve: bool,
@@ -234,12 +278,12 @@ async fn print_audio(
     if resolve {
         let f = bot.get_file(file_id.clone()).await?;
         let url = format!("https://api.telegram.org/file/bot{}/{}", token, f.path);
-        println!("[chat:{} user:@{}] audio: dur={}s performer={:?} title={:?} mime={:?} size={} file_id={} path={} url={}",
-            chat_id, user, a.duration, a.performer, a.title, a.mime_type, a.file.size,
+        println!("[chat:{} uid:{} user:@{}] audio: dur={}s performer={:?} title={:?} mime={:?} size={} file_id={} path={} url={}",
+            chat_id, uid, user, a.duration, a.performer, a.title, a.mime_type, a.file.size,
             file_id, f.path, url);
     } else {
-        println!("[chat:{} user:@{}] audio: dur={}s performer={:?} title={:?} mime={:?} size={} file_id={}",
-            chat_id, user, a.duration, a.performer, a.title, a.mime_type, a.file.size, file_id);
+        println!("[chat:{} uid:{} user:@{}] audio: dur={}s performer={:?} title={:?} mime={:?} size={} file_id={}",
+            chat_id, uid, user, a.duration, a.performer, a.title, a.mime_type, a.file.size, file_id);
     }
     Ok(())
 }
@@ -248,6 +292,7 @@ async fn print_voice(
     bot: &Bot,
     token: &str,
     chat_id: i64,
+    uid: i64,
     user: &str,
     v: &Voice,
     resolve: bool,
@@ -257,13 +302,13 @@ async fn print_voice(
         let f = bot.get_file(file_id.clone()).await?;
         let url = format!("https://api.telegram.org/file/bot{}/{}", token, f.path);
         println!(
-            "[chat:{} user:@{}] voice: dur={}s mime={:?} size={} file_id={} path={} url={}",
-            chat_id, user, v.duration, v.mime_type, v.file.size, file_id, f.path, url
+            "[chat:{} uid:{} user:@{}] voice: dur={}s mime={:?} size={} file_id={} path={} url={}",
+            chat_id, uid, user, v.duration, v.mime_type, v.file.size, file_id, f.path, url
         );
     } else {
         println!(
-            "[chat:{} user:@{}] voice: dur={}s mime={:?} size={} file_id={}",
-            chat_id, user, v.duration, v.mime_type, v.file.size, file_id
+            "[chat:{} uid:{} user:@{}] voice: dur={}s mime={:?} size={} file_id={}",
+            chat_id, uid, user, v.duration, v.mime_type, v.file.size, file_id
         );
     }
     Ok(())
@@ -273,6 +318,7 @@ async fn print_video_note(
     bot: &Bot,
     token: &str,
     chat_id: i64,
+    uid: i64,
     user: &str,
     vn: &VideoNote,
     resolve: bool,
@@ -282,13 +328,13 @@ async fn print_video_note(
         let f = bot.get_file(file_id.clone()).await?;
         let url = format!("https://api.telegram.org/file/bot{}/{}", token, f.path);
         println!(
-            "[chat:{} user:@{}] video_note: len={} size={} file_id={} path={} url={}",
-            chat_id, user, vn.length, vn.file.size, file_id, f.path, url
+            "[chat:{} uid:{} user:@{}] video_note: len={} size={} file_id={} path={} url={}",
+            chat_id, uid, user, vn.length, vn.file.size, file_id, f.path, url
         );
     } else {
         println!(
-            "[chat:{} user:@{}] video_note: len={} size={} file_id={}",
-            chat_id, user, vn.length, vn.file.size, file_id
+            "[chat:{} uid:{} user:@{}] video_note: len={} size={} file_id={}",
+            chat_id, uid, user, vn.length, vn.file.size, file_id
         );
     }
     Ok(())
@@ -298,6 +344,7 @@ async fn print_sticker(
     bot: &Bot,
     token: &str,
     chat_id: i64,
+    uid: i64,
     user: &str,
     s: &Sticker,
     resolve: bool,
@@ -306,12 +353,13 @@ async fn print_sticker(
     if resolve {
         let f = bot.get_file(file_id.clone()).await?;
         let url = format!("https://api.telegram.org/file/bot{}/{}", token, f.path);
-        println!("[chat:{} user:@{}] sticker: {}x{} is_animated={} is_video={} file_id={} path={} url={}",
-            chat_id, user, s.width, s.height, s.is_animated(), s.is_video(), file_id, f.path, url);
+        println!("[chat:{} uid:{} user:@{}] sticker: {}x{} is_animated={} is_video={} file_id={} path={} url={}",
+            chat_id, uid, user, s.width, s.height, s.is_animated(), s.is_video(), file_id, f.path, url);
     } else {
         println!(
-            "[chat:{} user:@{}] sticker: {}x{} is_animated={} is_video={} file_id={}",
+            "[chat:{} uid:{} user:@{}] sticker: {}x{} is_animated={} is_video={} file_id={}",
             chat_id,
+            uid,
             user,
             s.width,
             s.height,

@@ -8,7 +8,8 @@ use tracing::instrument;
 pub type Pool = SqlitePool;
 
 pub async fn init_pool(database_url: &str) -> Result<Pool> {
-    let pool = SqlitePool::connect(database_url).await?;
+    let normalized = prepare_sqlite_url(database_url);
+    let pool = SqlitePool::connect(&normalized).await?;
     // Enable WAL and stricter durability.
     sqlx::query("PRAGMA journal_mode=WAL;")
         .execute(&pool)
@@ -17,6 +18,66 @@ pub async fn init_pool(database_url: &str) -> Result<Pool> {
         .execute(&pool)
         .await?;
     Ok(pool)
+}
+
+/// If using a file-backed SQLite URL, expand a leading `~/` and ensure the parent
+/// directory exists. Leaves in-memory URLs untouched. Returns possibly-updated URL.
+fn prepare_sqlite_url(url: &str) -> String {
+    // Pass through non-sqlite schemes
+    if !url.starts_with("sqlite:") {
+        return url.to_string();
+    }
+
+    // In-memory URLs like sqlite::memory: or sqlite::memory:?cache=shared
+    if url.starts_with("sqlite::memory") {
+        return url.to_string();
+    }
+
+    // Strip prefix and optional //
+    let rest = &url["sqlite:".len()..];
+    let (had_slashes, path_with_query) = if let Some(r) = rest.strip_prefix("//") {
+        (true, r)
+    } else {
+        (false, rest)
+    };
+
+    // Separate query string if any
+    let (path_part, query_part) = match path_with_query.split_once('?') {
+        Some((p, q)) => (p, Some(q)),
+        None => (path_with_query, None),
+    };
+
+    if path_part.is_empty() {
+        // nothing to normalize
+        return url.to_string();
+    }
+
+    // Expand leading ~/ to HOME
+    let expanded_path = if let Some(rest) = path_part.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            format!("{}/{}", home.trim_end_matches('/'), rest)
+        } else {
+            path_part.to_string()
+        }
+    } else {
+        path_part.to_string()
+    };
+
+    // Ensure parent directory exists if any
+    if let Some(parent) = std::path::Path::new(&expanded_path).parent() {
+        if !parent.as_os_str().is_empty() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
+
+    // Rebuild URL, prefer sqlite:// form
+    let mut rebuilt = String::from("sqlite://");
+    rebuilt.push_str(&expanded_path);
+    if let Some(q) = query_part {
+        rebuilt.push('?');
+        rebuilt.push_str(q);
+    }
+    rebuilt
 }
 
 pub async fn run_migrations(pool: &Pool) -> Result<()> {

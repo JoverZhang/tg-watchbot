@@ -1,5 +1,5 @@
 use crate::db;
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use regex::Regex;
 use sqlx::SqlitePool;
 use teloxide::net::Download;
@@ -30,70 +30,100 @@ pub async fn handle_update(
 
     let message_id = msg.id.0 as i32;
     match &msg.kind {
-        MessageKind::Common(common) => match &common.media_kind {
-            MediaKind::Text(text) => {
-                let text_content = text.text.as_str();
-                if text_content.trim() == "==BEGIN==" {
-                    if let Err(err) = db::open_batch(pool, user_id).await {
-                        warn!(?err, "failed to open batch");
-                    } else {
-                        info!(user_id, "opened batch");
+        MessageKind::Common(common) => {
+            let text_content = msg.text().map(str::to_owned);
+            let caption = msg.caption().map(str::to_owned);
+
+            if let Some(text) = text_content.as_deref() {
+                handle_text_content(pool, user_id, message_id, text, true).await?;
+                return Ok(());
+            }
+
+            if let Some(caption) = caption.as_deref() {
+                handle_text_content(pool, user_id, message_id, caption, false).await?;
+            }
+
+            match &common.media_kind {
+                MediaKind::Text(_) => {}
+                MediaKind::Photo(photo) => {
+                    if let Some(size) = photo.photo.last() {
+                        let path = download_file(
+                            bot,
+                            data_dir,
+                            tg_user_id,
+                            message_id,
+                            size.file.id.as_ref(),
+                        )
+                        .await?;
+                        let batch_id = db::current_open_batch_id(pool, user_id).await?;
+                        let _rid = db::insert_resource(
+                            pool, user_id, batch_id, "photo", &path, message_id,
+                        )
+                        .await?;
                     }
-                } else if let Some(title) = parse_commit_title(text_content) {
-                    if let Err(err) = db::commit_batch(pool, user_id, title.as_deref()).await {
-                        warn!(?err, "failed to commit batch");
-                    } else {
-                        info!(user_id, "committed batch");
-                    }
-                } else if text_content.trim() == "==ROLLBACK==" {
-                    if let Err(err) = db::rollback_batch(pool, user_id).await {
-                        warn!(?err, "failed to rollback batch");
-                    } else {
-                        info!(user_id, "rolled back batch");
-                    }
-                } else {
-                    let batch_id = db::current_open_batch_id(pool, user_id).await?;
-                    let _rid = db::insert_resource(
-                        pool,
-                        user_id,
-                        batch_id,
-                        "text",
-                        text_content,
+                }
+                MediaKind::Video(video) => {
+                    let path = download_file(
+                        bot,
+                        data_dir,
+                        tg_user_id,
                         message_id,
+                        video.video.file.id.as_ref(),
                     )
                     .await?;
-                }
-            }
-            MediaKind::Photo(photo) => {
-                // Pick the highest resolution photo
-                if let Some(size) = photo.photo.last() {
-                    let path =
-                        download_file(bot, data_dir, tg_user_id, message_id, size.file.id.as_ref())
-                            .await?;
                     let batch_id = db::current_open_batch_id(pool, user_id).await?;
                     let _rid =
-                        db::insert_resource(pool, user_id, batch_id, "photo", &path, message_id)
+                        db::insert_resource(pool, user_id, batch_id, "video", &path, message_id)
                             .await?;
                 }
+                _ => {}
             }
-            MediaKind::Video(video) => {
-                let path = download_file(
-                    bot,
-                    data_dir,
-                    tg_user_id,
-                    message_id,
-                    video.video.file.id.as_ref(),
-                )
-                .await?;
-                let batch_id = db::current_open_batch_id(pool, user_id).await?;
-                let _rid = db::insert_resource(pool, user_id, batch_id, "video", &path, message_id)
-                    .await?;
-            }
-            _ => {}
-        },
+        }
         _ => {}
     }
 
+    Ok(())
+}
+
+async fn handle_text_content(
+    pool: &SqlitePool,
+    user_id: i64,
+    message_id: i32,
+    text_content: &str,
+    allow_commands: bool,
+) -> Result<()> {
+    if allow_commands && text_content.trim() == "==BEGIN==" {
+        if let Err(err) = db::open_batch(pool, user_id).await {
+            warn!(?err, "failed to open batch");
+        } else {
+            info!(user_id, "opened batch");
+        }
+        return Ok(());
+    }
+
+    if allow_commands {
+        if let Some(title) = parse_commit_title(text_content) {
+            if let Err(err) = db::commit_batch(pool, user_id, title.as_deref()).await {
+                warn!(?err, "failed to commit batch");
+            } else {
+                info!(user_id, "committed batch");
+            }
+            return Ok(());
+        }
+    }
+
+    if allow_commands && text_content.trim() == "==ROLLBACK==" {
+        if let Err(err) = db::rollback_batch(pool, user_id).await {
+            warn!(?err, "failed to rollback batch");
+        } else {
+            info!(user_id, "rolled back batch");
+        }
+        return Ok(());
+    }
+
+    let batch_id = db::current_open_batch_id(pool, user_id).await?;
+    let _rid =
+        db::insert_resource(pool, user_id, batch_id, "text", text_content, message_id).await?;
     Ok(())
 }
 

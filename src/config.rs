@@ -87,7 +87,7 @@ impl Config {
         if self.app.data_dir.trim().is_empty() {
             return Ok(());
         }
-        fs::create_dir_all(&self.app.data_dir)
+        fs::create_dir_all(self.app.resolved_data_dir())
     }
 }
 
@@ -161,6 +161,23 @@ fn validate(cfg: &Config) -> Result<(), ConfigError> {
     }
 
     Ok(())
+}
+
+impl App {
+    /// Return `data_dir` with a simple `~/` expansion to the current user's HOME.
+    /// If HOME is not set or the path doesn't start with `~/`, returns the original string.
+    pub fn resolved_data_dir(&self) -> String {
+        expand_tilde(&self.data_dir)
+    }
+}
+
+fn expand_tilde(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Ok(home) = std::env::var("HOME") {
+            return format!("{}/{}", home.trim_end_matches('/'), rest);
+        }
+    }
+    path.to_string()
 }
 
 /// Returns the exact example YAML content requested.
