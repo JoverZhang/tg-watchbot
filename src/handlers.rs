@@ -29,18 +29,69 @@ pub async fn handle_update(
     let user_id = db::get_or_create_user(pool, tg_user_id, username, Some(&full_name)).await?;
 
     let message_id = msg.id.0 as i32;
+
+    // If awaiting title input, handle it before any other processing
+    if let Some(state) = db::current_batch_state(pool, user_id).await? {
+        if state == crate::model::BatchState::WAITING_TITLE {
+            if let Some(text) = msg.text() {
+                let trimmed = text.trim();
+                if trimmed == "==ROLLBACK==" {
+                    if let Err(err) = db::rollback_batch(pool, user_id).await {
+                        warn!(?err, "failed to rollback batch");
+                    } else {
+                        let _ = bot
+                            .send_message(msg.chat.id, "Rolled back.")
+                            .await;
+                    }
+                    return Ok(());
+                }
+
+                if trimmed.is_empty() {
+                    let _ = bot
+                        .send_message(
+                            msg.chat.id,
+                            "Invalid input: title must be a non-empty text message. Please send text.",
+                        )
+                        .await;
+                    return Ok(());
+                }
+
+                // Use this text as the title and commit
+                if let Err(err) = db::commit_batch(pool, user_id, Some(trimmed)).await {
+                    warn!(?err, "failed to commit batch with provided title");
+                } else {
+                    let _ = bot
+                        .send_message(
+                            msg.chat.id,
+                            format!("Committed batch with title: {}", trimmed),
+                        )
+                        .await;
+                }
+                return Ok(());
+            } else {
+                // Non-text input while waiting for title
+                let _ = bot
+                    .send_message(
+                        msg.chat.id,
+                        "Invalid input: title must be a text message. Please send text.",
+                    )
+                    .await;
+                return Ok(());
+            }
+        }
+    }
     match &msg.kind {
         MessageKind::Common(common) => {
             let text_content = msg.text().map(str::to_owned);
             let caption = msg.caption().map(str::to_owned);
 
             if let Some(text) = text_content.as_deref() {
-                handle_text_content(pool, user_id, message_id, text, true).await?;
+                handle_text_content(bot, msg, pool, user_id, message_id, text, true).await?;
                 return Ok(());
             }
 
             if let Some(caption) = caption.as_deref() {
-                handle_text_content(pool, user_id, message_id, caption, false).await?;
+                handle_text_content(bot, msg, pool, user_id, message_id, caption, false).await?;
             }
 
             match &common.media_kind {
@@ -86,6 +137,8 @@ pub async fn handle_update(
 }
 
 async fn handle_text_content(
+    bot: &Bot,
+    msg: &Message,
     pool: &SqlitePool,
     user_id: i64,
     message_id: i32,
@@ -101,15 +154,24 @@ async fn handle_text_content(
         return Ok(());
     }
 
-    if allow_commands {
-        if let Some(title) = parse_commit_title(text_content) {
-            if let Err(err) = db::commit_batch(pool, user_id, title.as_deref()).await {
-                warn!(?err, "failed to commit batch");
-            } else {
-                info!(user_id, "committed batch");
+    if allow_commands && text_content.trim() == "==COMMIT==" {
+        match db::current_open_batch_id(pool, user_id).await? {
+            None => {
+                let _ = bot
+                    .send_message(msg.chat.id, "No open batch to commit.")
+                    .await;
             }
-            return Ok(());
+            Some(_) => {
+                if let Err(err) = db::mark_current_batch_waiting_title(pool, user_id).await {
+                    warn!(?err, "failed to mark batch waiting title");
+                } else {
+                    let _ = bot
+                        .send_message(msg.chat.id, "Please input title:")
+                        .await;
+                }
+            }
         }
+        return Ok(());
     }
 
     if allow_commands && text_content.trim() == "==ROLLBACK==" {
@@ -117,6 +179,7 @@ async fn handle_text_content(
             warn!(?err, "failed to rollback batch");
         } else {
             info!(user_id, "rolled back batch");
+            let _ = bot.send_message(msg.chat.id, "Rolled back.").await;
         }
         return Ok(());
     }
@@ -128,16 +191,8 @@ async fn handle_text_content(
 }
 
 fn parse_commit_title(text: &str) -> Option<Option<String>> {
-    // Accept patterns: "==COMMIT==" or "==COMMIT== (title)"
-    let trimmed = text.trim();
-    if trimmed == "==COMMIT==" {
-        return Some(None);
-    }
-    static RE: once_cell::sync::OnceCell<Regex> = once_cell::sync::OnceCell::new();
-    let re = RE.get_or_init(|| Regex::new(r"^==COMMIT==\s*\((?P<title>.+)\)\s*$").unwrap());
-    if let Some(caps) = re.captures(trimmed) {
-        return Some(Some(caps.name("title").unwrap().as_str().to_string()));
-    }
+    // Deprecated: old pattern no longer supported
+    let _ = text; // keep signature; always return None
     None
 }
 

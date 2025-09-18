@@ -122,6 +122,17 @@ pub async fn current_open_batch_id(pool: &Pool, user_id: i64) -> Result<Option<i
 }
 
 #[instrument(skip_all)]
+pub async fn current_batch_state(pool: &Pool, user_id: i64) -> Result<Option<BatchState>> {
+    let state: Option<String> = sqlx::query_scalar(
+        "SELECT b.state FROM batches b JOIN current_batch c ON c.batch_id = b.id WHERE c.user_id = ?",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(state.and_then(|s| BatchState::from_str(&s)))
+}
+
+#[instrument(skip_all)]
 pub async fn open_batch(pool: &Pool, user_id: i64) -> Result<i64> {
     let mut tx = pool.begin().await?;
     let existing =
@@ -214,6 +225,25 @@ pub async fn commit_batch(pool: &Pool, user_id: i64, title: Option<&str>) -> Res
         .await?;
     tx.commit().await?;
     Ok(batch_id)
+}
+
+#[instrument(skip_all)]
+pub async fn mark_current_batch_waiting_title(pool: &Pool, user_id: i64) -> Result<()> {
+    let mut tx = pool.begin().await?;
+    let batch_id =
+        sqlx::query_scalar::<_, i64>("SELECT batch_id FROM current_batch WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    let Some(batch_id) = batch_id else {
+        return Err(anyhow!("no open batch"));
+    };
+    sqlx::query("UPDATE batches SET state = 'WAITING_TITLE' WHERE id = ?")
+        .bind(batch_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
 }
 
 #[instrument(skip_all)]
