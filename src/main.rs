@@ -14,6 +14,7 @@ mod handlers;
 mod model;
 mod notion;
 mod outbox;
+mod thumbnail;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about)]
@@ -41,6 +42,9 @@ async fn main() -> Result<()> {
 
     let pool = db::init_pool(&database_url).await?;
     db::run_migrations(&pool).await?;
+
+    // Preflight dependency check
+    thumbnail::ensure_ffmpeg_available().await?;
 
     // Spawn outbox worker (single-threaded)
     let notion_client =

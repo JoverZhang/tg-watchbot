@@ -138,6 +138,22 @@ pub async fn handle_update(
                         video.video.file.id.as_ref(),
                     )
                     .await?;
+                    // Generate thumbnail before persisting; treat failure as overall failure
+                    match crate::thumbnail::generate_thumbnail(&path, data_dir).await {
+                        Ok(thumb_path) => {
+                            info!(video=%path, thumb=%thumb_path.display(), "generated thumbnail");
+                        }
+                        Err(err) => {
+                            warn!(?err, video=%path, "failed to generate thumbnail; aborting save");
+                            let _ = bot
+                                .send_message(
+                                    msg.chat.id,
+                                    "Failed to save video (thumbnail generation error).",
+                                )
+                                .await;
+                            return Ok(());
+                        }
+                    }
                     let batch_id = db::current_open_batch_id(pool, user_id).await?;
                     let _rid =
                         db::insert_resource(pool, user_id, batch_id, "video", &path, message_id)

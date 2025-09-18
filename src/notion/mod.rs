@@ -225,6 +225,25 @@ impl NotionClient {
         self.execute_create(body).await
     }
 
+    /// Create a resource page with multiple uploaded files (e.g., thumbnail + video)
+    pub async fn create_resource_page_with_file_uploads(
+        &self,
+        ids: &NotionIds,
+        parent_main_page_id: Option<&str>,
+        order: i64,
+        text: Option<&str>,
+        files: &[(String, String)], // (name, file_upload_id)
+    ) -> Result<String> {
+        let body = build_resource_page_request_with_uploads(
+            ids,
+            parent_main_page_id,
+            order,
+            text,
+            files,
+        );
+        self.execute_create(body).await
+    }
+
     pub async fn retrieve_database(
         &self,
         database_id: &str,
@@ -326,7 +345,7 @@ impl NotionClient {
         Ok(create_response.id)
     }
 
-    fn get_content_type(&self, file_path: &Path) -> &'static str {
+fn get_content_type(&self, file_path: &Path) -> &'static str {
         match file_path
             .extension()
             .and_then(|ext| ext.to_str())
@@ -468,6 +487,58 @@ pub fn build_resource_page_request(
                 ]
             }),
         );
+    }
+
+    json!({
+        "parent": { "database_id": ids.resource_db },
+        "properties": Value::Object(properties),
+    })
+}
+
+/// Build a resource page request that includes multiple uploaded files under the media property.
+pub fn build_resource_page_request_with_uploads(
+    ids: &NotionIds,
+    parent_main_page_id: Option<&str>,
+    order: i64,
+    text: Option<&str>,
+    files: &[(String, String)], // (name, file_upload_id)
+) -> Value {
+    let mut properties = Map::new();
+    if let Some(parent_id) = parent_main_page_id {
+        properties.insert(
+            ids.f_rel_parent.clone(),
+            json!({ "relation": [{ "id": parent_id }] }),
+        );
+    }
+
+    properties.insert(
+        ids.f_res_order.clone(),
+        json!({
+            "title": [ { "text": { "content": format!("#{}", order) } } ]
+        }),
+    );
+
+    if let Some(text_content) = text.filter(|t| !t.is_empty()) {
+        properties.insert(
+            ids.f_res_text.clone(),
+            json!({
+                "rich_text": [ { "text": { "content": text_content } } ]
+            }),
+        );
+    }
+
+    if !files.is_empty() {
+        let files_json: Vec<Value> = files
+            .iter()
+            .map(|(name, id)| {
+                json!({
+                    "name": if name.is_empty() { "Uploaded file" } else { name },
+                    "type": "file_upload",
+                    "file_upload": { "id": id }
+                })
+            })
+            .collect();
+        properties.insert(ids.f_res_media.clone(), json!({ "files": files_json }));
     }
 
     json!({

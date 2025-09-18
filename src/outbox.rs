@@ -142,21 +142,61 @@ async fn push_resource_task(
             // Use the DB `content` as a local file path if it exists
             let path = std::path::Path::new(&resource.content);
             if path.exists() {
-                let file_name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("uploaded.bin");
-                let upload_id = client.upload_file(path).await?;
-                client
-                    .create_resource_page_with_file_upload(
-                        notion_ids,
-                        parent_page_id.as_deref(),
-                        resource.sequence,
-                        text,
-                        Some(file_name),
-                        Some(&upload_id),
-                    )
-                    .await?
+                // If this is a video, attempt to also attach its generated thumbnail first
+                if resource.kind == "video" {
+                    let mut files: Vec<(String, String)> = Vec::new();
+
+                    // Derive thumbnail path: data_dir/media/thumbs/{video_stem}.jpg
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        // Try to locate the 'media' directory ancestor to infer data_dir
+                        let thumb_path = derive_thumb_path_from_video(path, stem);
+                        if let Some(tp) = thumb_path {
+                            if tp.exists() {
+                                let tname = tp
+                                    .file_name()
+                                    .and_then(|n| n.to_str())
+                                    .unwrap_or("thumb.jpg");
+                                let tid = client.upload_file(&tp).await?;
+                                files.push((tname.to_string(), tid));
+                            }
+                        }
+                    }
+
+                    // Always upload the video itself second
+                    let vname = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("video.bin");
+                    let vid = client.upload_file(path).await?;
+                    files.push((vname.to_string(), vid));
+
+                    client
+                        .create_resource_page_with_file_uploads(
+                            notion_ids,
+                            parent_page_id.as_deref(),
+                            resource.sequence,
+                            text,
+                            &files,
+                        )
+                        .await?
+                } else {
+                    // Non-video: single file upload
+                    let file_name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("uploaded.bin");
+                    let upload_id = client.upload_file(path).await?;
+                    client
+                        .create_resource_page_with_file_upload(
+                            notion_ids,
+                            parent_page_id.as_deref(),
+                            resource.sequence,
+                            text,
+                            Some(file_name),
+                            Some(&upload_id),
+                        )
+                        .await?
+                }
             } else {
                 // Fallback: create without media
                 notion
@@ -200,4 +240,20 @@ fn sanitize_media_url(raw: Option<&str>) -> Option<String> {
         return None;
     }
     Some(url.to_string())
+}
+
+/// Try to derive `{data_dir}/media/thumbs/{stem}.jpg` from a video path like
+/// `{data_dir}/media/{user_id}/{stem}.{ext}`.
+fn derive_thumb_path_from_video(video_path: &std::path::Path, stem: &str) -> Option<std::path::PathBuf> {
+    // Find the "media" directory in the ancestors
+    let mut cur = video_path.parent();
+    while let Some(p) = cur {
+        if p.file_name().and_then(|n| n.to_str()) == Some("media") {
+            // data_dir is parent of media
+            let data_dir = p.parent()?;
+            return Some(data_dir.join("media").join("thumbs").join(format!("{}.jpg", stem)));
+        }
+        cur = p.parent();
+    }
+    None
 }
