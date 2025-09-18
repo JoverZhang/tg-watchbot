@@ -1,9 +1,9 @@
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
-use std::any::Any;
 use reqwest::{Client, StatusCode, Url};
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use std::any::Any;
 use std::fmt;
 use std::path::Path;
 use tokio::fs;
@@ -327,13 +327,17 @@ impl NotionClient {
     }
 
     fn get_content_type(&self, file_path: &Path) -> &'static str {
-        match file_path.extension().and_then(|ext| ext.to_str()) {
-            Some("jpg") | Some("jpeg") => "image/jpeg",
-            Some("png") => "image/png",
-            Some("gif") => "image/gif",
-            Some("mp4") => "video/mp4",
-            Some("mov") => "video/quicktime",
-            Some("avi") => "video/x-msvideo",
+        match file_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|s| s.to_ascii_lowercase())
+        {
+            Some(ext) if ext == "jpg" || ext == "jpeg" => "image/jpeg",
+            Some(ext) if ext == "png" => "image/png",
+            Some(ext) if ext == "gif" => "image/gif",
+            Some(ext) if ext == "mp4" => "video/mp4",
+            Some(ext) if ext == "mov" => "video/quicktime",
+            Some(ext) if ext == "avi" => "video/x-msvideo",
             _ => "application/octet-stream",
         }
     }

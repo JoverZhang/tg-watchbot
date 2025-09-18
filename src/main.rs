@@ -77,19 +77,36 @@ async fn main() -> Result<()> {
         let pool = pool.clone();
         let data_dir = data_dir.clone();
         async move {
+            // Show keyboard and register commands only on /start to avoid spamming every message
+            if let Some(text) = msg.text() {
+                if text == "/start" {
+                    bot.set_chat_menu_button()
+                        .chat_id(msg.chat.id)
+                        .menu_button(MenuButton::Default)
+                        .await?;
 
-            bot.set_chat_menu_button()
-                .chat_id(msg.chat.id)
-                .menu_button(MenuButton::Commands)
-                .await?;
+                    bot.set_my_commands(vec![
+                        BotCommand::new("begin", "Open a new batch"),
+                        BotCommand::new("commit", "Commit current batch (will ask for title)"),
+                        BotCommand::new("rollback", "Rollback current batch"),
+                        BotCommand::new("ping", "Health check"),
+                    ])
+                    .await?;
 
-            bot.send_message(msg.chat.id, "Please select an action:")
-                .reply_markup(KeyboardMarkup::new(vec![
-                    vec![KeyboardButton::new("==BEGIN==")],
-                    vec![KeyboardButton::new("==COMMIT==")],
-                    vec![KeyboardButton::new("==ROLLBACK==")],
-                ]))
-                .await?;
+                    bot.send_message(msg.chat.id, "Please select an action:")
+                        .reply_markup(KeyboardMarkup::new(vec![
+                            vec![
+                                KeyboardButton::new("/begin"),
+                                KeyboardButton::new("/commit"),
+                            ],
+                            vec![
+                                KeyboardButton::new("/ping"),
+                                KeyboardButton::new("/rollback"),
+                            ],
+                        ]))
+                        .await?;
+                }
+            }
 
             if let Err(err) = handlers::handle_update(&bot, &pool, &data_dir, &msg).await {
                 error!(?err, "failed to handle update");

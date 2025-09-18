@@ -35,7 +35,7 @@ pub async fn handle_update(
         if state == crate::model::BatchState::WAITING_TITLE {
             if let Some(text) = msg.text() {
                 let trimmed = text.trim();
-                if trimmed == "==ROLLBACK==" {
+                if trimmed.eq_ignore_ascii_case("/rollback") {
                     if let Err(err) = db::rollback_batch(pool, user_id).await {
                         warn!(?err, "failed to rollback batch");
                     } else {
@@ -43,6 +43,16 @@ pub async fn handle_update(
                             .send_message(msg.chat.id, "Rolled back.")
                             .await;
                     }
+                    return Ok(());
+                }
+                // Disallow commands as titles while waiting for title
+                if trimmed.starts_with('/') {
+                    let _ = bot
+                        .send_message(
+                            msg.chat.id,
+                            "Invalid input: title must be a text message. Please send text.",
+                        )
+                        .await;
                     return Ok(());
                 }
 
@@ -111,6 +121,12 @@ pub async fn handle_update(
                             pool, user_id, batch_id, "photo", &path, message_id,
                         )
                         .await?;
+                        let ack = if batch_id.is_some() {
+                            "Saved photo (in batch)."
+                        } else {
+                            "Saved photo."
+                        };
+                        let _ = bot.send_message(msg.chat.id, ack).await;
                     }
                 }
                 MediaKind::Video(video) => {
@@ -126,8 +142,18 @@ pub async fn handle_update(
                     let _rid =
                         db::insert_resource(pool, user_id, batch_id, "video", &path, message_id)
                             .await?;
+                    let ack = if batch_id.is_some() {
+                        "Saved video (in batch)."
+                    } else {
+                        "Saved video."
+                    };
+                    let _ = bot.send_message(msg.chat.id, ack).await;
                 }
-                _ => {}
+                _ => {
+                    let _ = bot
+                        .send_message(msg.chat.id, "Unsupported message type.")
+                        .await;
+                }
             }
         }
         _ => {}
@@ -145,16 +171,29 @@ async fn handle_text_content(
     text_content: &str,
     allow_commands: bool,
 ) -> Result<()> {
-    if allow_commands && text_content.trim() == "==BEGIN==" {
+    let trimmed = text_content.trim();
+
+    // Ignore /start here (UI is handled in main.rs); do not persist it
+    if allow_commands && trimmed == "/start" {
+        return Ok(());
+    }
+
+    // Ping health check
+    if allow_commands && (trimmed == "/ping") {
+        let _ = bot.send_message(msg.chat.id, "PONG").await;
+        return Ok(());
+    }
+    if allow_commands && trimmed == "/begin" {
         if let Err(err) = db::open_batch(pool, user_id).await {
             warn!(?err, "failed to open batch");
         } else {
             info!(user_id, "opened batch");
+            let _ = bot.send_message(msg.chat.id, "Opened batch.").await;
         }
         return Ok(());
     }
 
-    if allow_commands && text_content.trim() == "==COMMIT==" {
+    if allow_commands && trimmed == "/commit" {
         match db::current_open_batch_id(pool, user_id).await? {
             None => {
                 let _ = bot
@@ -174,7 +213,7 @@ async fn handle_text_content(
         return Ok(());
     }
 
-    if allow_commands && text_content.trim() == "==ROLLBACK==" {
+    if allow_commands && trimmed == "/rollback" {
         if let Err(err) = db::rollback_batch(pool, user_id).await {
             warn!(?err, "failed to rollback batch");
         } else {
@@ -184,9 +223,23 @@ async fn handle_text_content(
         return Ok(());
     }
 
+    // Unknown slash command: reply and do not persist
+    if allow_commands && trimmed.starts_with('/') {
+        let _ = bot
+            .send_message(msg.chat.id, "Unknown command.")
+            .await;
+        return Ok(());
+    }
+
     let batch_id = db::current_open_batch_id(pool, user_id).await?;
     let _rid =
         db::insert_resource(pool, user_id, batch_id, "text", text_content, message_id).await?;
+    let ack = if batch_id.is_some() {
+        "Saved (in batch)."
+    } else {
+        "Saved."
+    };
+    let _ = bot.send_message(msg.chat.id, ack).await;
     Ok(())
 }
 
