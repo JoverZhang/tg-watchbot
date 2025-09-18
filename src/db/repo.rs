@@ -7,6 +7,7 @@ use sqlx::{Sqlite, SqlitePool};
 use tracing::instrument;
 
 pub type Pool = SqlitePool;
+type OutboxItem = (i64, i64, String, i64, i32);
 
 pub async fn init_pool(database_url: &str) -> Result<Pool> {
     let normalized = prepare_sqlite_url(database_url);
@@ -129,7 +130,7 @@ pub async fn current_batch_state(pool: &Pool, user_id: i64) -> Result<Option<Bat
     .bind(user_id)
     .fetch_optional(pool)
     .await?;
-    Ok(state.and_then(|s| BatchState::from_str(&s)))
+    Ok(state.and_then(|s| BatchState::parse_state(&s)))
 }
 
 #[instrument(skip_all)]
@@ -146,7 +147,7 @@ pub async fn open_batch(pool: &Pool, user_id: i64) -> Result<i64> {
     let batch_id: i64 =
         sqlx::query("INSERT INTO batches (user_id, state) VALUES (?, ?) RETURNING id")
             .bind(user_id)
-            .bind(BatchState::OPEN.as_str())
+            .bind(BatchState::Open.as_str())
             .fetch_one(&mut *tx)
             .await?
             .get("id");
@@ -312,7 +313,7 @@ pub async fn fetch_batch_for_outbox(pool: &Pool, batch_id: i64) -> Result<BatchF
     };
 
     let state_str: String = row.get("state");
-    let state = BatchState::from_str(&state_str)
+    let state = BatchState::parse_state(&state_str)
         .ok_or_else(|| anyhow!("batch {} has unknown state {}", batch_id, state_str))?;
 
     Ok(BatchForOutbox {
@@ -369,7 +370,7 @@ pub async fn fetch_resource_for_outbox(pool: &Pool, resource_id: i64) -> Result<
         .try_get::<Option<String>, _>("batch_state")
         .ok()
         .flatten()
-        .and_then(|s| BatchState::from_str(&s));
+        .and_then(|s| BatchState::parse_state(&s));
 
     Ok(ResourceForOutbox {
         batch_id: batch_id_opt,
@@ -452,7 +453,7 @@ async fn enqueue_outbox_tx(
 }
 
 #[instrument(skip_all)]
-pub async fn next_due_outbox(pool: &Pool) -> Result<Option<(i64, i64, String, i64, i32)>> {
+pub async fn next_due_outbox(pool: &Pool) -> Result<Option<OutboxItem>> {
     let row = sqlx::query(
         "SELECT id, user_id, kind, ref_id, attempt FROM outbox WHERE datetime(due_at) <= CURRENT_TIMESTAMP ORDER BY (CASE WHEN kind = 'push_batch' THEN 0 ELSE 1 END), datetime(due_at) ASC LIMIT 1",
     )
@@ -539,6 +540,33 @@ pub async fn backoff_outbox_with_cap(
     Ok(())
 }
 
+#[instrument(skip_all)]
+pub async fn get_last_processed_outbox_id(pool: &Pool) -> Result<i64> {
+    let id: i64 = sqlx::query_scalar("SELECT last_sent_outbox_id FROM outbox_cursor WHERE id = 1")
+        .fetch_one(pool)
+        .await?;
+    Ok(id)
+}
+
+#[instrument(skip_all)]
+pub async fn update_last_processed_outbox_id(pool: &Pool, outbox_id: i64) -> Result<()> {
+    sqlx::query(
+        "UPDATE outbox_cursor SET last_sent_outbox_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
+    )
+    .bind(outbox_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+#[instrument(skip_all)]
+pub async fn count_remaining_outbox_tasks(pool: &Pool) -> Result<i64> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM outbox")
+        .fetch_one(pool)
+        .await?;
+    Ok(count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -589,33 +617,4 @@ mod tests {
             backoff_outbox(&pool, oid, attempt).await.unwrap();
         }
     }
-}
-
-#[instrument(skip_all)]
-pub async fn get_last_processed_outbox_id(pool: &Pool) -> Result<i64> {
-    let id: i64 = sqlx::query_scalar(
-        "SELECT last_sent_outbox_id FROM outbox_cursor WHERE id = 1",
-    )
-    .fetch_one(pool)
-    .await?;
-    Ok(id)
-}
-
-#[instrument(skip_all)]
-pub async fn update_last_processed_outbox_id(pool: &Pool, outbox_id: i64) -> Result<()> {
-    sqlx::query(
-        "UPDATE outbox_cursor SET last_sent_outbox_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = 1",
-    )
-    .bind(outbox_id)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-#[instrument(skip_all)]
-pub async fn count_remaining_outbox_tasks(pool: &Pool) -> Result<i64> {
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM outbox")
-        .fetch_one(pool)
-        .await?;
-    Ok(count)
 }

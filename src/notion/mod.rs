@@ -7,7 +7,7 @@ use std::any::Any;
 use std::fmt;
 use std::path::Path;
 use tokio::fs;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::notion::model::RetrieveDatabaseResp;
@@ -82,16 +82,16 @@ impl NotionClient {
     /// schemas and mapping display names -> property IDs. Returns `NotionIds`
     /// whose `f_*` fields are property IDs (not display names).
     pub async fn resolve_property_ids(&self, cfg: &Config) -> Result<NotionIds> {
-        let main_db = self
+        let _main_db = self
             .retrieve_database(&cfg.notion.databases.main.id)
             .await
             .context("failed to retrieve main database schema")?;
-        let res_db = self
+        let _res_db = self
             .retrieve_database(&cfg.notion.databases.resource.id)
             .await
             .context("failed to retrieve resource database schema")?;
 
-        let lookup = |db: &RetrieveDatabaseResp, name: &str| -> Result<String> {
+        let _lookup = |db: &RetrieveDatabaseResp, name: &str| -> Result<String> {
             db.properties
                 .get(name)
                 .map(|p| p.id.clone())
@@ -234,13 +234,8 @@ impl NotionClient {
         text: Option<&str>,
         files: &[(String, String)], // (name, file_upload_id)
     ) -> Result<String> {
-        let body = build_resource_page_request_with_uploads(
-            ids,
-            parent_main_page_id,
-            order,
-            text,
-            files,
-        );
+        let body =
+            build_resource_page_request_with_uploads(ids, parent_main_page_id, order, text, files);
         self.execute_create(body).await
     }
 
@@ -345,7 +340,7 @@ impl NotionClient {
         Ok(create_response.id)
     }
 
-fn get_content_type(&self, file_path: &Path) -> &'static str {
+    fn get_content_type(&self, file_path: &Path) -> &'static str {
         match file_path
             .extension()
             .and_then(|ext| ext.to_str())
@@ -556,16 +551,6 @@ struct CreatePageResponse {
 struct CreateFileUploadResponse {
     id: String,
     upload_url: String,
-}
-
-#[derive(Deserialize)]
-struct CompleteFileUploadResponse {
-    file: UploadedFile,
-}
-
-#[derive(Deserialize)]
-struct UploadedFile {
-    url: String,
 }
 
 /// Thin façade that binds a `NotionClient` to resolved property IDs. It exposes

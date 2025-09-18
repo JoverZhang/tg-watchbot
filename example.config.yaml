@@ -17,6 +17,7 @@ notion:
       id: "NOTION_MAIN_DATABASE_ID"
       fields:
         title: "Title"
+        unique: "Unique"
     resource:
       id: "NOTION_RESOURCE_DATABASE_ID"
       fields:
@@ -24,4 +25,3 @@ notion:
         order: "No"
         text: "Text"
         media: "Media"
-

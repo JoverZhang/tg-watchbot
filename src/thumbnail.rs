@@ -66,4 +66,3 @@ pub async fn generate_thumbnail<P: AsRef<Path>>(video_path: P, data_dir: &str) -
 
     Ok(thumb_path)
 }
-

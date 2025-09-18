@@ -86,10 +86,10 @@ async fn test_syncer_logic_with_real_tasks() {
         .unwrap();
     let batch_id = db::open_batch(&pool, user_id).await.unwrap();
 
-    let r1 = db::insert_resource(&pool, user_id, Some(batch_id), "text", "note1", 10)
+    let _r1 = db::insert_resource(&pool, user_id, Some(batch_id), "text", "note1", 10)
         .await
         .unwrap();
-    let r2 = db::insert_resource(&pool, user_id, Some(batch_id), "text", "note2", 11)
+    let _r2 = db::insert_resource(&pool, user_id, Some(batch_id), "text", "note2", 11)
         .await
         .unwrap();
 

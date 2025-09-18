@@ -51,7 +51,7 @@ async fn push_batch_task(
         return Ok(());
     }
 
-    if batch.state != BatchState::COMMITTED {
+    if batch.state != BatchState::Committed {
         return Err(anyhow!(
             "batch {} not committed (state {:?})",
             batch_id,
@@ -90,7 +90,7 @@ async fn push_resource_task(
                 batch_id
             )
         })?;
-        if state != BatchState::COMMITTED {
+        if state != BatchState::Committed {
             return Err(anyhow!(
                 "batch {} not ready for resource {} (state {:?})",
                 batch_id,
@@ -244,14 +244,22 @@ fn sanitize_media_url(raw: Option<&str>) -> Option<String> {
 
 /// Try to derive `{data_dir}/media/thumbs/{stem}.jpg` from a video path like
 /// `{data_dir}/media/{user_id}/{stem}.{ext}`.
-fn derive_thumb_path_from_video(video_path: &std::path::Path, stem: &str) -> Option<std::path::PathBuf> {
+fn derive_thumb_path_from_video(
+    video_path: &std::path::Path,
+    stem: &str,
+) -> Option<std::path::PathBuf> {
     // Find the "media" directory in the ancestors
     let mut cur = video_path.parent();
     while let Some(p) = cur {
         if p.file_name().and_then(|n| n.to_str()) == Some("media") {
             // data_dir is parent of media
             let data_dir = p.parent()?;
-            return Some(data_dir.join("media").join("thumbs").join(format!("{}.jpg", stem)));
+            return Some(
+                data_dir
+                    .join("media")
+                    .join("thumbs")
+                    .join(format!("{}.jpg", stem)),
+            );
         }
         cur = p.parent();
     }

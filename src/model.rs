@@ -3,28 +3,28 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BatchState {
-    OPEN,
-    WAITING_TITLE,
-    COMMITTED,
-    ROLLED_BACK,
+    Open,
+    WaitingTitle,
+    Committed,
+    RolledBack,
 }
 
 impl BatchState {
     pub fn as_str(&self) -> &'static str {
         match self {
-            BatchState::OPEN => "OPEN",
-            BatchState::WAITING_TITLE => "WAITING_TITLE",
-            BatchState::COMMITTED => "COMMITTED",
-            BatchState::ROLLED_BACK => "ROLLED_BACK",
+            BatchState::Open => "OPEN",
+            BatchState::WaitingTitle => "WAITING_TITLE",
+            BatchState::Committed => "COMMITTED",
+            BatchState::RolledBack => "ROLLED_BACK",
         }
     }
 
-    pub fn from_str(value: &str) -> Option<Self> {
+    pub fn parse_state(value: &str) -> Option<Self> {
         match value {
-            "OPEN" => Some(BatchState::OPEN),
-            "WAITING_TITLE" => Some(BatchState::WAITING_TITLE),
-            "COMMITTED" => Some(BatchState::COMMITTED),
-            "ROLLED_BACK" => Some(BatchState::ROLLED_BACK),
+            "OPEN" => Some(BatchState::Open),
+            "WAITING_TITLE" => Some(BatchState::WaitingTitle),
+            "COMMITTED" => Some(BatchState::Committed),
+            "ROLLED_BACK" => Some(BatchState::RolledBack),
             _ => None,
         }
     }

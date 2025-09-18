@@ -106,10 +106,10 @@ async fn test_sequence_generation_multiple_batches() {
 
     // Create first batch
     let batch1_id = db::open_batch(&pool, user_id).await.unwrap();
-    let r1 = db::insert_resource(&pool, user_id, Some(batch1_id), "text", "batch1_item1", 700)
+    let _r1 = db::insert_resource(&pool, user_id, Some(batch1_id), "text", "batch1_item1", 700)
         .await
         .unwrap();
-    let r2 = db::insert_resource(&pool, user_id, Some(batch1_id), "text", "batch1_item2", 800)
+    let _r2 = db::insert_resource(&pool, user_id, Some(batch1_id), "text", "batch1_item2", 800)
         .await
         .unwrap();
 
@@ -120,10 +120,10 @@ async fn test_sequence_generation_multiple_batches() {
 
     // Create second batch
     let batch2_id = db::open_batch(&pool, user_id).await.unwrap();
-    let r3 = db::insert_resource(&pool, user_id, Some(batch2_id), "text", "batch2_item1", 900)
+    let _r3 = db::insert_resource(&pool, user_id, Some(batch2_id), "text", "batch2_item1", 900)
         .await
         .unwrap();
-    let r4 = db::insert_resource(
+    let _r4 = db::insert_resource(
         &pool,
         user_id,
         Some(batch2_id),

@@ -37,8 +37,8 @@ async fn run(cfg: &Config, key: &str) -> Result<()> {
         .context("failed to retrieve main database schema")?;
     // Resolve unique property (accept name or id from config) and its type
     let unique_prop_cfg = &cfg.notion.databases.main.fields.unique;
-    let (unique_prop_name, unique_prop_type) = resolve_prop_name_and_type(&main_schema, unique_prop_cfg)
-        .ok_or_else(|| {
+    let (unique_prop_name, unique_prop_type) =
+        resolve_prop_name_and_type(&main_schema, unique_prop_cfg).ok_or_else(|| {
             anyhow!(
                 "unique property '{}' not found by name or id in main database",
                 unique_prop_cfg
@@ -68,7 +68,7 @@ async fn run(cfg: &Config, key: &str) -> Result<()> {
         .get("results")
         .and_then(|v| v.as_array())
         .ok_or_else(|| anyhow!("invalid Notion response for main query"))?;
-    let main_page = results.get(0).ok_or_else(|| {
+    let main_page = results.first().ok_or_else(|| {
         anyhow!(
             "no main row matched key '{}' on property '{}'",
             key,
@@ -123,10 +123,8 @@ async fn run(cfg: &Config, key: &str) -> Result<()> {
         let ord = extract_title_number(props.get(&order_prop)).unwrap_or(0);
         let text = extract_rich_text(props.get(&text_prop));
         let files = extract_files(props.get(&media_prop));
-        let kind = if text.is_some() { "text" } else { "media" };
         rows.push(Row {
             ord,
-            kind: kind.to_string(),
             text,
             files,
             video_local_rel: None,
@@ -247,14 +245,8 @@ async fn run(cfg: &Config, key: &str) -> Result<()> {
     println!("Wrote {} and {}", index_path.display(), css_path.display());
 
     println!("================================");
-    println!(
-        "Index full path: {}",
-        absolute_path(&index_path).display()
-    );
-    println!(
-        "Video full path: {}",
-        absolute_path(&video_dir).display()
-    );
+    println!("Index full path: {}", absolute_path(&index_path).display());
+    println!("Video full path: {}", absolute_path(&video_dir).display());
     Ok(())
 }
 
@@ -314,7 +306,6 @@ fn render_html(key: &str, rows: &[Row]) -> String {
 #[derive(Debug, Clone)]
 struct Row {
     ord: i64,
-    kind: String,
     text: Option<String>,
     files: Vec<FileEntry>,
     // If present, relative path under html/ pointing to downloaded video (e.g., "video/2.mp4")

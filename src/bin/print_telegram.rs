@@ -43,7 +43,7 @@ pub async fn print_message_expanded(
         .and_then(|u| u.username.clone())
         .unwrap_or_default();
     let uid = msg.from().map(|u| u.id.0 as i64).unwrap_or(0);
-    let message_id = msg.id.0 as i32;
+    let message_id = msg.id.0;
     println!("message_id: {}", message_id);
 
     // Text/caption

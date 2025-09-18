@@ -124,7 +124,7 @@ async fn print_pending_notion_payloads(
         match kind.as_str() {
             "push_batch" => {
                 let batch = db::fetch_batch_for_outbox(pool, ref_id).await?;
-                if batch.state != BatchState::COMMITTED {
+                if batch.state != BatchState::Committed {
                     warn!(batch_id = ref_id, state = ?batch.state, "batch not committed yet; skipping dry-run payload");
                     continue;
                 }
@@ -143,7 +143,7 @@ async fn print_pending_notion_payloads(
                 let resource = db::fetch_resource_for_outbox(pool, ref_id).await?;
                 let parent_page = if let Some(batch_id) = resource.batch_id {
                     match resource.batch_state {
-                        Some(BatchState::COMMITTED) => {
+                        Some(BatchState::Committed) => {
                             if let Some(page) = resource.batch_notion_page_id.clone() {
                                 Some(page)
                             } else {
