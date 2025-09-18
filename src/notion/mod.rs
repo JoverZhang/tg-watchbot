@@ -6,6 +6,10 @@ use serde_json::{json, Map, Value};
 use std::fmt;
 use tracing::debug;
 
+use crate::notion::model::RetrieveDatabaseResp;
+
+mod model;
+
 const NOTION_API_BASE: &str = "https://api.notion.com/";
 
 #[derive(Clone)]
@@ -132,6 +136,19 @@ impl NotionClient {
             media_url,
         );
         self.execute_create(body).await
+    }
+
+    pub async fn retrieve_database(&self, database_id: &str) -> anyhow::Result<RetrieveDatabaseResp> {
+        let url = self.base_url.join(&format!("v1/databases/{}", database_id))?;
+        let res = self.http
+            .get(url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Notion-Version", &self.version)
+            .send().await?;
+        if !res.status().is_success() {
+            return Err(anyhow::anyhow!("notion retrieve db error {}: {}", res.status(), res.text().await.unwrap_or_default()));
+        }
+        Ok(res.json::<RetrieveDatabaseResp>().await?)
     }
 }
 
