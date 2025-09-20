@@ -52,8 +52,7 @@ wget https://raw.githubusercontent.com/JoverZhang/tg-watchbot/refs/heads/master/
 # edit config.yaml
 
 mkdir -p data && touch data/watchbot.db
-docker pull ghcr.io/joverzhang/tg-watchbot/tg-watchbot:0.1
-sudo docker run -d --name tg-watchbot -v $PWD:/app ghcr.io/joverzhang/tg-watchbot/tg-watchbot:0.1 /usr/local/bin/app --config 
+docker run -d --name tg-watchbot -v $PWD:/app ghcr.io/joverzhang/tg-watchbot/tg-watchbot:0.1 /usr/local/bin/app --config 
 config.yaml
 ```
 
