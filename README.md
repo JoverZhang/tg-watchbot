@@ -47,11 +47,9 @@ notion:
 ## Usage
 
 ```bash
-git clone https://github.com/JoverZhang/tg-watchbot.git
-cp example.config.yaml config.yaml
+wget https://raw.githubusercontent.com/JoverZhang/tg-watchbot/refs/heads/master/example.config.yaml -O config.yaml
 # edit config.yaml
-mkdir -p data
-touch data/watchbot.db
+mkdir -p data && touch data/watchbot.db
 docker run --name tg-watchbot -v $PWD/data:/app/data tg-watchbot
 ```
 
