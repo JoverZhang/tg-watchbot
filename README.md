@@ -47,10 +47,14 @@ notion:
 ## Usage
 
 ```bash
+mkdir -p tg-watchbot && cd tg-watchbot
 wget https://raw.githubusercontent.com/JoverZhang/tg-watchbot/refs/heads/master/example.config.yaml -O config.yaml
 # edit config.yaml
+
 mkdir -p data && touch data/watchbot.db
-docker run --name tg-watchbot -v $PWD/data:/app/data tg-watchbot
+docker pull ghcr.io/joverzhang/tg-watchbot/tg-watchbot:0.1
+sudo docker run -d --name tg-watchbot -v $PWD:/app ghcr.io/joverzhang/tg-watchbot/tg-watchbot:0.1 /usr/local/bin/app --config 
+config.yaml
 ```
 
 ## Runtime overview
