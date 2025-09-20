@@ -42,15 +42,12 @@ WORKDIR /src/app
 # If you use workspaces with multiple bins, ensure BIN_NAME matches Cargo.toml
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    bash -lc '\
-      set -eux; \
+    sh -euxc '\
       if [ "${PROFILE}" = "release" ]; then \
         cargo build --locked --release ${FEATURES:+--features ${FEATURES}}; \
-        echo "target path: target/release/${BIN_NAME}"; \
         test -x "target/release/${BIN_NAME}"; \
       else \
         cargo build --locked ${FEATURES:+--features ${FEATURES}}; \
-        echo "target path: target/debug/${BIN_NAME}"; \
         test -x "target/debug/${BIN_NAME}"; \
       fi \
     '
@@ -76,7 +73,7 @@ WORKDIR /app
 
 # Build args must be re-declared to use them again in this stage (for copy path)
 ARG PROFILE=release
-ARG BIN_NAME
+ARG BIN_NAME=tg-watchbot
 
 # Copy the compiled binary from the builder stage
 # The path depends on the selected profile
@@ -95,5 +92,4 @@ USER appuser
 ENV RUST_LOG=info
 
 # Default entrypoint launches your app; ffmpeg is available in PATH
-ENTRYPOINT ["/usr/local/bin/app"]
 # CMD ["--help"]  # optionally provide default args
